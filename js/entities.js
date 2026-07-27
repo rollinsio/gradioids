@@ -157,11 +157,11 @@ export class Bullet {
     this.life = b.life;
   }
 
-  static fromShip(ship) {
+  static fromShip(ship, angleOffset = 0) {
     return new Bullet(
       ship.x + Math.cos(ship.angle) * ship.radius * 1.3,
       ship.y + Math.sin(ship.angle) * ship.radius * 1.3,
-      ship.angle,
+      ship.angle + angleOffset,
       ship.vx,
       ship.vy
     );
@@ -187,6 +187,71 @@ export class Bullet {
     ctx.arc(this.x, this.y, this.radius, 0, TAU);
     ctx.fill();
     ctx.shadowBlur = 0;
+  }
+}
+
+// Homing missile: launched from the ship, steers toward the nearest
+// asteroid at a limited turn rate so it arcs rather than snaps.
+export class Missile {
+  constructor(x, y, angle) {
+    this.radius = CFG.missile.radius;
+    this.x = x;
+    this.y = y;
+    this.angle = angle;
+    this.life = CFG.missile.life;
+  }
+
+  update(dt, asteroids) {
+    const m = CFG.missile;
+    let best = null;
+    let bestD = Infinity;
+    for (const a of asteroids) {
+      const d = (a.x - this.x) ** 2 + (a.y - this.y) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = a;
+      }
+    }
+    if (best) {
+      const want = Math.atan2(best.y - this.y, best.x - this.x);
+      let diff = want - this.angle;
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      const maxTurn = m.turnRate * dt;
+      this.angle += Math.max(-maxTurn, Math.min(maxTurn, diff));
+    }
+    this.x += Math.cos(this.angle) * m.speed * dt;
+    this.y += Math.sin(this.angle) * m.speed * dt;
+    this.life -= dt;
+    wrapPosition(this, this.radius);
+  }
+
+  get dead() {
+    return this.life <= 0;
+  }
+
+  draw(ctx, t) {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.angle);
+    ctx.strokeStyle = CFG.colors.missile;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = CFG.colors.missile;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(6, 0);
+    ctx.lineTo(-4, 3);
+    ctx.lineTo(-4, -3);
+    ctx.closePath();
+    ctx.stroke();
+    if (Math.floor(t * 20) % 2 === 0) {
+      ctx.strokeStyle = CFG.colors.thrust;
+      ctx.shadowColor = CFG.colors.thrust;
+      ctx.beginPath();
+      ctx.moveTo(-4, 0);
+      ctx.lineTo(-9, 0);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 }
 
@@ -297,17 +362,27 @@ export class Orb {
   }
 }
 
-// Dropped by destroyed asteroids; fly into it to gain an orb.
+// Visual identity for each pickup type: color key into CFG.colors
+// plus the letter drawn inside the ring (orb keeps its plain dot).
+const PICKUP_STYLE = {
+  orb: { colorKey: 'pickup', letter: '' },
+  missile: { colorKey: 'missile', letter: 'M' },
+  spread: { colorKey: 'spread', letter: 'S' },
+  nuke: { colorKey: 'nuke', letter: 'N' },
+};
+
+// Dropped by destroyed asteroids; fly into it to collect the upgrade.
 export class Pickup {
-  constructor(x, y) {
-    this.radius = CFG.orb.pickupRadius;
+  constructor(x, y, type = 'orb') {
+    this.type = type;
+    this.radius = CFG.pickup.radius;
     this.x = x;
     this.y = y;
     const dir = rand(0, TAU);
     const speed = rand(10, 30);
     this.vx = Math.cos(dir) * speed;
     this.vy = Math.sin(dir) * speed;
-    this.life = CFG.orb.pickupLife;
+    this.life = CFG.pickup.life;
   }
 
   update(dt) {
@@ -324,19 +399,28 @@ export class Pickup {
   draw(ctx, t) {
     // Blink during the final seconds before expiring.
     if (this.life < 2 && Math.floor(t * 6) % 2 === 0) return;
+    const style = PICKUP_STYLE[this.type];
+    const color = CFG.colors[style.colorKey];
     const pulse = 1 + 0.2 * Math.sin(t * 5);
     ctx.save();
-    ctx.strokeStyle = CFG.colors.pickup;
+    ctx.strokeStyle = color;
     ctx.lineWidth = 2;
-    ctx.shadowColor = CFG.colors.pickup;
+    ctx.shadowColor = color;
     ctx.shadowBlur = 10;
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius * pulse, 0, TAU);
     ctx.stroke();
-    ctx.fillStyle = CFG.colors.pickup;
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, 3, 0, TAU);
-    ctx.fill();
+    ctx.fillStyle = color;
+    if (style.letter) {
+      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(style.letter, this.x, this.y + 1);
+    } else {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, 3, 0, TAU);
+      ctx.fill();
+    }
     ctx.restore();
   }
 }

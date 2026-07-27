@@ -31,7 +31,7 @@ for (let i = 0; i < 30; i++) game.update(dt);
 check('ship auto-fires with no input', game.bullets.length > 0);
 
 // 2. Collecting a pickup grants an orb.
-game.pickups.push(new Pickup(game.ship.x, game.ship.y));
+game.pickups.push(new Pickup(game.ship.x, game.ship.y, 'orb'));
 game.update(dt);
 check('pickup collection grants an orb', game.orbs.length === 1);
 
@@ -55,9 +55,9 @@ const dist = Math.hypot(orb.x - game.ship.x, orb.y - game.ship.y);
 check(`orb stays near the ship when parked (d=${dist.toFixed(1)})`, dist < 50);
 
 // 5. Max orbs, then surplus pickups become points.
-game.pickups.push(new Pickup(game.ship.x, game.ship.y));
+game.pickups.push(new Pickup(game.ship.x, game.ship.y, 'orb'));
 game.update(dt);
-game.pickups.push(new Pickup(game.ship.x, game.ship.y));
+game.pickups.push(new Pickup(game.ship.x, game.ship.y, 'orb'));
 game.update(dt);
 check('orbs capped at CFG.orb.max', game.orbs.length === CFG.orb.max);
 // Isolate scoring for this frame: park rocks far from the ship and
@@ -65,10 +65,57 @@ check('orbs capped at CFG.orb.max', game.orbs.length === CFG.orb.max);
 game.asteroids.forEach((a) => { a.x = 550; a.y = 550; a.vx = 0; a.vy = 0; });
 game.bullets = [];
 const before = game.score;
-game.pickups.push(new Pickup(game.ship.x, game.ship.y));
+game.pickups.push(new Pickup(game.ship.x, game.ship.y, 'orb'));
 game.update(dt);
 check('surplus pickup pays bonus points',
-  game.score === before + CFG.orb.surplusScore && game.orbs.length === CFG.orb.max);
+  game.score === before + CFG.pickup.surplusScore && game.orbs.length === CFG.orb.max);
+
+// 5b. Spread pickup: volleys of CFG.spread.count in a tight cone, slower.
+game.pickups.push(new Pickup(game.ship.x, game.ship.y, 'spread'));
+game.update(dt);
+check('spread pickup arms the spread cannon', game.hasSpread === true);
+game.bullets = [];
+game.fireCooldown = 0;
+game.update(dt);
+const volleyShots = game.bullets.filter((b) => !b.fromOrb);
+check(`spread fires ${CFG.spread.count} bullets per volley (got ${volleyShots.length})`,
+  volleyShots.length === CFG.spread.count);
+const angles = volleyShots.map((b) => Math.atan2(b.vy - game.ship.vy, b.vx - game.ship.vx));
+const arc = Math.max(...angles) - Math.min(...angles);
+const wantArc = (CFG.spread.count - 1) * CFG.spread.angleStep;
+check(`spread cone spans ~${wantArc.toFixed(2)} rad (got ${arc.toFixed(2)})`,
+  Math.abs(arc - wantArc) < 0.02);
+check('spread volleys are slower than the plain cannon',
+  game.fireCooldown === CFG.bullet.cooldown * CFG.spread.cooldownMult);
+
+// 5c. Missile pickup: homing missiles launch and steer toward rocks.
+game.pickups.push(new Pickup(game.ship.x, game.ship.y, 'missile'));
+game.update(dt);
+check('missile pickup arms the launcher', game.hasMissiles === true);
+game.missileCooldown = 0;
+game.update(dt);
+check('missiles launch automatically', game.missiles.length > 0);
+const missile = game.missiles[0];
+const rockTarget = game.asteroids[0];
+const before5c = Math.hypot(rockTarget.x - missile.x, rockTarget.y - missile.y);
+for (let i = 0; i < 30; i++) game.update(dt); // 0.5s of homing
+const tracked = game.missiles[0];
+const after5c = tracked
+  ? Math.hypot(rockTarget.x - tracked.x, rockTarget.y - tracked.y)
+  : 0; // already hit something — good enough
+check('missile closes on the nearest asteroid', after5c < before5c);
+
+// 5d. Nuke pickup clears the level and pays every rock's score.
+game.bullets = [];
+game.missiles = [];
+const rockScore = game.asteroids.reduce((n, a) => n + a.score, 0);
+check('nuke test has rocks to clear', game.asteroids.length > 0);
+const beforeNuke = game.score;
+game.pickups.push(new Pickup(game.ship.x, game.ship.y, 'nuke'));
+game.update(dt);
+check('nuke clears every asteroid', game.asteroids.length === 0);
+check('nuke pays each asteroid score',
+  game.score === beforeNuke + rockScore);
 
 // 6. Death clears orbs. Drop a fresh LARGE asteroid on the ship: even
 // if same-frame bullets destroy it, its split children occupy the same
@@ -81,6 +128,8 @@ rock.vy = 0;
 game.asteroids.push(rock);
 game.update(dt);
 check('death clears orbs (Gradius rules)', game.orbs.length === 0);
+check('death clears missiles and spread too',
+  !game.hasMissiles && !game.hasSpread && game.missiles.length === 0);
 
 // 6b. Rotation stepping: opposite swipe brakes to a stop, a second
 // one reverses, same-direction is a no-op.

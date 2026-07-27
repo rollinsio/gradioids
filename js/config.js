@@ -29,10 +29,29 @@ export const CFG = {
     max: 3,
     cooldown: 0.8,        // 4× the ship's cooldown — orbs fire at 1/4 rate
     trailDelay: 0.18,     // s of ship-trail each orb lags behind the previous
-    dropChance: 0.12,     // chance a destroyed asteroid drops a pickup
-    pickupLife: 9,        // s before an uncollected pickup fades
-    pickupRadius: 9,
-    surplusScore: 500,    // points for a pickup collected at max orbs
+  },
+
+  missile: {
+    radius: 3,
+    speed: 300,           // px/s
+    turnRate: 4.0,        // rad/s homing turn toward the nearest asteroid
+    life: 3.0,            // s before a missile expires
+    cooldown: 1.5,        // s between launches
+  },
+
+  spread: {
+    count: 3,             // bullets per volley
+    angleStep: 0.17,      // rad between volley bullets — a tight cone
+    cooldownMult: 2,      // volley cooldown = bullet.cooldown × this (slower)
+  },
+
+  pickup: {
+    dropChance: 0.14,     // chance a destroyed asteroid drops a pickup
+    life: 9,              // s before an uncollected pickup fades
+    radius: 9,
+    surplusScore: 500,    // points for a pickup you already have maxed
+    // Relative drop weights — nuke is very rare by design.
+    weights: { orb: 10, missile: 5, spread: 5, nuke: 1 },
   },
 
   // Tier 0 = small … tier 2 = large. Large asteroids split into
@@ -64,6 +83,9 @@ export const CFG = {
     bullet: '#ffe066',
     asteroid: '#c9d8e8',
     orb: '#b18cff',
+    missile: '#ffa94d',
+    spread: '#7dff8a',
+    nuke: '#ffffff',
     pickup: '#ff6ec7',
     text: '#e8f4ff',
     dim: '#7aa0b8',

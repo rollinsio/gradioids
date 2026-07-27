@@ -1,6 +1,6 @@
 import { CFG } from './config.js';
 import { Input, Controls, Keys } from './input.js';
-import { Ship, Asteroid, Bullet, Orb, Pickup, collides, explosion, rand } from './entities.js';
+import { Ship, Asteroid, Bullet, Missile, Orb, Pickup, collides, explosion, rand } from './entities.js';
 import { Music } from './audio.js';
 
 const HISCORE_KEY = 'gradioids.hiscore';
@@ -26,11 +26,16 @@ export class Game {
     this.particles = [];
     this.orbs = [];
     this.pickups = [];
+    this.missiles = [];
     this.shipTrail = [];
+    this.hasMissiles = false;
+    this.hasSpread = false;
     this.score = 0;
     this.lives = CFG.ship.lives;
     this.wave = 0;
     this.fireCooldown = 0;
+    this.missileCooldown = 0;
+    this.nukeFlash = 0;
     this.respawnTimer = 0;
     this.waveTimer = 0;
     this.newHiscore = false;
@@ -65,6 +70,62 @@ export class Game {
       } while (Math.hypot(x - CFG.W / 2, y - CFG.H / 2) < CFG.wave.safeRadius);
       this.asteroids.push(new Asteroid(CFG.asteroidTiers.length - 1, x, y));
     }
+  }
+
+  destroyAsteroid(hit) {
+    this.asteroids.splice(this.asteroids.indexOf(hit), 1);
+    this.asteroids.push(...hit.split());
+    this.addScore(hit.score);
+    if (Math.random() < CFG.pickup.dropChance) {
+      this.pickups.push(new Pickup(hit.x, hit.y, this.choosePickupType()));
+    }
+    explosion(this.particles, hit.x, hit.y, CFG.colors.asteroid);
+  }
+
+  choosePickupType() {
+    const weights = CFG.pickup.weights;
+    let total = 0;
+    for (const type in weights) total += weights[type];
+    let r = Math.random() * total;
+    for (const [type, w] of Object.entries(weights)) {
+      r -= w;
+      if (r <= 0) return type;
+    }
+    return 'orb';
+  }
+
+  collectPickup(pickup) {
+    switch (pickup.type) {
+      case 'orb':
+        if (this.orbs.length < CFG.orb.max) {
+          this.orbs.push(new Orb(this.orbs.length, this.ship.x, this.ship.y));
+        } else {
+          this.addScore(CFG.pickup.surplusScore);
+        }
+        break;
+      case 'missile':
+        if (this.hasMissiles) this.addScore(CFG.pickup.surplusScore);
+        else this.hasMissiles = true;
+        break;
+      case 'spread':
+        if (this.hasSpread) this.addScore(CFG.pickup.surplusScore);
+        else this.hasSpread = true;
+        break;
+      case 'nuke':
+        this.detonateNuke();
+        break;
+    }
+  }
+
+  // Clears the level outright: every rock pays its score, nothing
+  // splits, nothing drops — just the flash and the wave-clear timer.
+  detonateNuke() {
+    for (const a of this.asteroids) {
+      this.addScore(a.score);
+      explosion(this.particles, a.x, a.y, CFG.colors.asteroid);
+    }
+    this.asteroids = [];
+    this.nukeFlash = 0.6;
   }
 
   update(dt) {
@@ -147,11 +208,27 @@ export class Game {
       }
       this.fireCooldown -= dt;
       // The ship's cannon is fully automatic — no fire button. The
-      // on-screen cap only counts the ship's own shots, not orb shots.
+      // on-screen cap only counts the ship's own shots, not orb shots,
+      // and scales with the volley size so spread doesn't choke itself.
       const shipShots = this.bullets.reduce((n, b) => n + (b.fromOrb ? 0 : 1), 0);
-      if (this.fireCooldown <= 0 && shipShots < CFG.bullet.max) {
-        this.bullets.push(Bullet.fromShip(this.ship));
-        this.fireCooldown = CFG.bullet.cooldown;
+      const volley = this.hasSpread ? CFG.spread.count : 1;
+      if (this.fireCooldown <= 0 && shipShots < CFG.bullet.max * volley) {
+        if (this.hasSpread) {
+          const mid = (CFG.spread.count - 1) / 2;
+          for (let i = 0; i < CFG.spread.count; i++) {
+            this.bullets.push(
+              Bullet.fromShip(this.ship, (i - mid) * CFG.spread.angleStep));
+          }
+          this.fireCooldown = CFG.bullet.cooldown * CFG.spread.cooldownMult;
+        } else {
+          this.bullets.push(Bullet.fromShip(this.ship));
+          this.fireCooldown = CFG.bullet.cooldown;
+        }
+      }
+      this.missileCooldown -= dt;
+      if (this.hasMissiles && this.missileCooldown <= 0 && this.asteroids.length > 0) {
+        this.missiles.push(new Missile(this.ship.x, this.ship.y, this.ship.angle));
+        this.missileCooldown = CFG.missile.cooldown;
       }
       for (const orb of this.orbs) {
         orb.follow(this.shipTrail, this.time);
@@ -175,49 +252,54 @@ export class Game {
 
     this.asteroids.forEach((a) => a.update(dt));
     this.bullets.forEach((b) => b.update(dt));
+    this.missiles.forEach((m) => m.update(dt, this.asteroids));
     this.particles.forEach((p) => p.update(dt));
     this.pickups.forEach((p) => p.update(dt));
     this.bullets = this.bullets.filter((b) => !b.dead);
+    this.missiles = this.missiles.filter((m) => !m.dead);
     this.particles = this.particles.filter((p) => !p.dead);
     this.pickups = this.pickups.filter((p) => !p.dead);
+    if (this.nukeFlash > 0) this.nukeFlash -= dt;
 
-    // Collect orb pickups.
+    // Collect pickups.
     if (shipAlive) {
       for (const pickup of this.pickups) {
         if (!collides(this.ship, pickup)) continue;
         pickup.life = 0;
-        if (this.orbs.length < CFG.orb.max) {
-          this.orbs.push(new Orb(this.orbs.length, this.ship.x, this.ship.y));
-        } else {
-          this.addScore(CFG.orb.surplusScore);
-        }
-        explosion(this.particles, pickup.x, pickup.y, CFG.colors.pickup, 8);
+        this.collectPickup(pickup);
+        const color =
+          CFG.colors[pickup.type === 'orb' ? 'pickup' : pickup.type];
+        explosion(this.particles, pickup.x, pickup.y, color, 8);
       }
       this.pickups = this.pickups.filter((p) => !p.dead);
     }
 
-    // Bullets vs asteroids.
+    // Bullets and missiles vs asteroids.
     for (const bullet of this.bullets) {
       const hit = this.asteroids.find((a) => collides(bullet, a));
       if (!hit) continue;
       bullet.life = 0;
-      this.asteroids.splice(this.asteroids.indexOf(hit), 1);
-      this.asteroids.push(...hit.split());
-      this.addScore(hit.score);
-      if (Math.random() < CFG.orb.dropChance) {
-        this.pickups.push(new Pickup(hit.x, hit.y));
-      }
-      explosion(this.particles, hit.x, hit.y, CFG.colors.asteroid);
+      this.destroyAsteroid(hit);
     }
     this.bullets = this.bullets.filter((b) => !b.dead);
+    for (const missile of this.missiles) {
+      const hit = this.asteroids.find((a) => collides(missile, a));
+      if (!hit) continue;
+      missile.life = 0;
+      this.destroyAsteroid(hit);
+    }
+    this.missiles = this.missiles.filter((m) => !m.dead);
 
     // Ship vs asteroids.
     if (shipAlive && this.ship.invuln <= 0) {
       const hit = this.asteroids.find((a) => collides(this.ship, a));
       if (hit) {
         explosion(this.particles, this.ship.x, this.ship.y, CFG.colors.ship, 24);
-        this.orbs = [];       // classic Gradius rules: options die with you
+        this.orbs = [];       // classic Gradius rules: upgrades die with you
         this.shipTrail = [];
+        this.missiles = [];
+        this.hasMissiles = false;
+        this.hasSpread = false;
         this.lives -= 1;
         if (this.lives <= 0) {
           this.state = 'gameover';
@@ -302,6 +384,7 @@ export class Game {
     this.asteroids.forEach((a) => a.draw(ctx));
     this.pickups.forEach((p) => p.draw(ctx, this.time));
     this.bullets.forEach((b) => b.draw(ctx));
+    this.missiles.forEach((m) => m.draw(ctx, this.time));
     if (this.state !== 'gameover' && this.respawnTimer <= 0) {
       this.orbs.forEach((o) => o.draw(ctx, this.time));
       this.ship.draw(ctx, this.time);
@@ -325,13 +408,26 @@ export class Game {
       ctx.restore();
     }
 
-    // Speed level pips, bottom-left.
+    // Speed level pips bottom-left, active weapons bottom-right.
     if (this.respawnTimer <= 0) {
       for (let i = 0; i < CFG.ship.maxSpeedLevel; i++) {
         const filled = i < this.ship.speedLevel;
         ctx.fillStyle = filled ? CFG.colors.accent : 'rgba(122, 160, 184, 0.35)';
         ctx.fillRect(16 + i * 16, CFG.H - 24, 10, 12);
       }
+      let wx = CFG.W - 22;
+      if (this.hasSpread) {
+        this.text('S', wx, CFG.H - 18, { size: 16, color: CFG.colors.spread, glow: 6 });
+        wx -= 22;
+      }
+      if (this.hasMissiles) {
+        this.text('M', wx, CFG.H - 18, { size: 16, color: CFG.colors.missile, glow: 6 });
+      }
+    }
+
+    if (this.nukeFlash > 0) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${(this.nukeFlash / 0.6) * 0.8})`;
+      ctx.fillRect(0, 0, CFG.W, CFG.H);
     }
 
     if (this.state === 'playing' && this.asteroids.length === 0) {

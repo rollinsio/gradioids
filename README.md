@@ -56,15 +56,23 @@ test/sim.mjs          headless smoke test (node test/sim.mjs)
 
 ## Upgrades
 
-Destroyed asteroids sometimes drop a pink pickup. Fly into it to gain an
-**orb** — a Gradius-style option that trails behind the ship and auto-fires
-at the nearest asteroid at 1/4 of the ship's fire rate. Up to
-`CFG.orb.max` orbs; extra pickups pay bonus points. Dying loses all orbs
-(classic rules). Every attribute is tunable in `js/config.js` under `orb`.
+Destroyed asteroids sometimes drop a pickup (chance and rarity weights in
+`CFG.pickup`). Fly into it to collect:
+
+| Pickup | Color | Effect |
+| --- | --- | --- |
+| ● (orb) | pink | Gradius-style option: trails the ship, auto-fires at the nearest rock at 1/4 the ship's rate. Up to `CFG.orb.max`. |
+| M (missile) | orange | Arms a launcher: homing missiles that arc toward the nearest asteroid every `CFG.missile.cooldown` s. |
+| S (spread) | green | Swaps the cannon for 3-shot volleys in a tight cone — more coverage, slower cadence. |
+| N (nuke) | white | Very rare. Detonates on pickup: every asteroid on screen dies and pays its score. |
+
+Pickups you already have maxed pay bonus points instead. Dying loses
+everything (classic rules). All attributes live in `js/config.js` under
+`orb`, `missile`, `spread`, and `pickup`.
 
 ## Roadmap
 
-- More upgrade types (speed, double shot, shield) on the pickup system
+- More upgrade types (speed, shield) on the pickup system
 - Hardware input tuning (turn rate, autofire cadence) once tested on glasses
 - IMU head-tilt steering experiment (`DeviceOrientationEvent`)
 - Submit to glassapps.io
