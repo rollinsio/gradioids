@@ -33,26 +33,24 @@ export class Ship {
     this.vx = 0;
     this.vy = 0;
     this.angle = -Math.PI / 2;
+    this.speedLevel = 0;
     this.invuln = CFG.ship.invulnTime;
     this.thrusting = false;
   }
 
+  // Stepped drive: the ship flies where it points at speedLevel *
+  // speedStep, easing toward that velocity so turns and speed changes
+  // feel smooth rather than instant.
   update(dt, controls) {
     const c = CFG.ship;
     this.angle += controls.rotate * c.turnRate * dt;
-    this.thrusting = controls.thrust;
-    if (controls.thrust) {
-      this.vx += Math.cos(this.angle) * c.thrust * dt;
-      this.vy += Math.sin(this.angle) * c.thrust * dt;
-    }
-    const decay = Math.exp(-c.drag * dt);
-    this.vx *= decay;
-    this.vy *= decay;
-    const speed = Math.hypot(this.vx, this.vy);
-    if (speed > c.maxSpeed) {
-      this.vx *= c.maxSpeed / speed;
-      this.vy *= c.maxSpeed / speed;
-    }
+    this.thrusting = this.speedLevel > 0;
+    const targetSpeed = this.speedLevel * c.speedStep;
+    const tx = Math.cos(this.angle) * targetSpeed;
+    const ty = Math.sin(this.angle) * targetSpeed;
+    const k = 1 - Math.exp(-c.accel * dt);
+    this.vx += (tx - this.vx) * k;
+    this.vy += (ty - this.vy) * k;
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     wrapPosition(this, this.radius);

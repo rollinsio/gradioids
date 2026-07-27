@@ -7,9 +7,9 @@ export const CFG = {
   ship: {
     radius: 12,
     turnRate: 3.8,        // rad/s while rotating
-    thrust: 240,          // px/s^2
-    drag: 0.6,            // exponential velocity decay per second
-    maxSpeed: 340,        // px/s
+    speedStep: 75,        // px/s per speed level
+    maxSpeedLevel: 4,     // up-swipes past this do nothing
+    accel: 3.5,           // 1/s exponential approach to the target speed
     invulnTime: 2.5,      // s of spawn protection
     respawnDelay: 1.2,    // s between death and respawn
     lives: 3,

@@ -21,19 +21,17 @@ Controls (desktop = glasses):
 
 | Key | Neural Band | In game |
 | --- | --- | --- |
-| ← / → | swipe left/right | rotate |
-| ↑ | swipe up | thrust |
+| ← / → | swipe left/right | toggle rotation (same again stops, opposite reverses) |
+| ↑ | swipe up | speed level +1 |
+| ↓ | swipe down | speed level −1 |
 | Enter | index pinch | select (menus) |
 | Escape | middle pinch | pause / back |
 
-The ship fires automatically — there is no fire button. Two control schemes
-are available in Settings (persisted to `localStorage`):
-
-- **Tap-toggle** (default) — each press toggles rotation/thrust; ↓ is
-  all-stop. This is the scheme that works on glasses: Neural Band swipes
-  arrive as discrete key taps, not holds.
-- **Hold** — keys act while held. Better feel when playing with a real
-  keyboard in a desktop browser.
+The ship fires automatically — there is no fire button. Flight is a
+stepped drive: the ship flies where it points at one of
+`CFG.ship.maxSpeedLevel` speed levels (HUD pips bottom-left), easing
+between levels and around turns. Everything is discrete swipes — no
+held keys — because Neural Band gestures arrive as single key taps.
 
 ## Deploy to the glasses
 

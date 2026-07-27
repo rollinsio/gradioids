@@ -2,38 +2,17 @@ import { CFG } from './config.js';
 import { Input, Controls, Keys } from './input.js';
 import { Ship, Asteroid, Bullet, Orb, Pickup, collides, explosion, rand } from './entities.js';
 
-const SETTINGS_KEY = 'gradioids.settings';
 const HISCORE_KEY = 'gradioids.hiscore';
-
-// 'tap' is the default: Neural Band swipes arrive as discrete key taps,
-// so the hold scheme only works with a physical keyboard.
-const DEFAULT_SETTINGS = { scheme: 'tap' };
-
-function loadJSON(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? { ...fallback, ...JSON.parse(raw) } : { ...fallback };
-  } catch {
-    return { ...fallback };
-  }
-}
 
 export class Game {
   constructor(canvas) {
     this.ctx = canvas.getContext('2d');
     this.input = new Input();
-    this.settings = loadJSON(SETTINGS_KEY, DEFAULT_SETTINGS);
-    this.controls = new Controls(this.input, this.settings);
+    this.controls = new Controls(this.input);
     this.hiscore = Number(localStorage.getItem(HISCORE_KEY)) || 0;
     this.state = 'menu';
     this.menuIndex = 0;
     this.time = 0;
-  }
-
-  saveSettings() {
-    try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
-    } catch { /* storage full or unavailable — settings just won't persist */ }
   }
 
   // ---- run state -----------------------------------------------------
@@ -89,7 +68,6 @@ export class Game {
     this.time += dt;
     switch (this.state) {
       case 'menu': this.updateMenu(); break;
-      case 'settings': this.updateSettings(); break;
       case 'playing': this.updatePlaying(dt); break;
       case 'paused': this.updatePaused(); break;
       case 'gameover': this.updateGameover(); break;
@@ -109,35 +87,7 @@ export class Game {
   }
 
   updateMenu() {
-    this.menuNav(2);
-    if (this.input.pressed(Keys.SELECT)) {
-      if (this.menuIndex === 0) this.newGame();
-      else {
-        this.state = 'settings';
-        this.menuIndex = 0;
-      }
-    }
-  }
-
-  updateSettings() {
-    this.menuNav(2);
-    const toggle = () => {
-      if (this.menuIndex === 0) {
-        this.settings.scheme = this.settings.scheme === 'hold' ? 'tap' : 'hold';
-        this.saveSettings();
-      } else {
-        this.state = 'menu';
-        this.menuIndex = 0;
-      }
-    };
-    if (this.input.pressed(Keys.SELECT)) toggle();
-    if (this.menuIndex === 0 && (this.input.pressed(Keys.LEFT) || this.input.pressed(Keys.RIGHT))) {
-      toggle();
-    }
-    if (this.input.pressed(Keys.BACK)) {
-      this.state = 'menu';
-      this.menuIndex = 0;
-    }
+    if (this.input.pressed(Keys.SELECT)) this.newGame();
   }
 
   updatePaused() {
@@ -173,9 +123,13 @@ export class Game {
     }
 
     const shipAlive = this.respawnTimer <= 0;
-    const c = shipAlive ? this.controls.update() : { rotate: 0, thrust: false };
+    const c = shipAlive ? this.controls.update() : { rotate: 0, speedDelta: 0 };
 
     if (shipAlive) {
+      if (c.speedDelta !== 0) {
+        this.ship.speedLevel = Math.max(0, Math.min(
+          CFG.ship.maxSpeedLevel, this.ship.speedLevel + c.speedDelta));
+      }
       this.ship.update(dt, c);
       this.shipTrail.push({ t: this.time, x: this.ship.x, y: this.ship.y });
       const maxDelay = (CFG.orb.max + 1) * CFG.orb.trailDelay;
@@ -284,7 +238,6 @@ export class Game {
 
     switch (this.state) {
       case 'menu': this.renderMenu(); break;
-      case 'settings': this.renderSettings(); break;
       case 'playing':
       case 'paused':
       case 'gameover':
@@ -328,21 +281,9 @@ export class Game {
   renderMenu() {
     this.text('GRADIOIDS', CFG.W / 2, 150, { size: 52, color: CFG.colors.accent, glow: 18 });
     this.text(`HIGH SCORE  ${this.hiscore}`, CFG.W / 2, 215, { size: 18, color: CFG.colors.dim });
-    this.menuList(['START', 'SETTINGS'], 310);
-    this.text('swipe: aim · pinch: select', CFG.W / 2, 520, { size: 16, color: CFG.colors.dim });
-  }
-
-  renderSettings() {
-    this.text('SETTINGS', CFG.W / 2, 130, { size: 36, color: CFG.colors.accent, glow: 12 });
-    const scheme = this.settings.scheme === 'hold' ? 'HOLD' : 'TAP-TOGGLE';
-    this.menuList([`CONTROLS: ${scheme}`, 'BACK'], 260);
-    const help = this.settings.scheme === 'hold'
-      ? 'hold keys to steer & thrust'
-      : 'tap toggles rotate/thrust · down = stop';
-    this.text(help, CFG.W / 2, 460, { size: 16, color: CFG.colors.dim });
-    this.text('your ship fires automatically', CFG.W / 2, 490, {
-      size: 16, color: CFG.colors.dim,
-    });
+    this.menuList(['START'], 320);
+    this.text('swipe ←→ rotate · ↑↓ speed', CFG.W / 2, 490, { size: 16, color: CFG.colors.dim });
+    this.text('your ship fires automatically', CFG.W / 2, 520, { size: 16, color: CFG.colors.dim });
   }
 
   renderWorld() {
@@ -372,6 +313,15 @@ export class Game {
       ctx.closePath();
       ctx.stroke();
       ctx.restore();
+    }
+
+    // Speed level pips, bottom-left.
+    if (this.respawnTimer <= 0) {
+      for (let i = 0; i < CFG.ship.maxSpeedLevel; i++) {
+        const filled = i < this.ship.speedLevel;
+        ctx.fillStyle = filled ? CFG.colors.accent : 'rgba(122, 160, 184, 0.35)';
+        ctx.fillRect(16 + i * 16, CFG.H - 24, 10, 12);
+      }
     }
 
     if (this.state === 'playing' && this.asteroids.length === 0) {

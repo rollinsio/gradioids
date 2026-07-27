@@ -82,7 +82,17 @@ game.asteroids.push(rock);
 game.update(dt);
 check('death clears orbs (Gradius rules)', game.orbs.length === 0);
 
-// 7. Long random run: no crashes across deaths, waves, respawns.
+// 7. Stepped drive: the ship cruises at speedLevel * speedStep.
+game.newGame();
+game.ship.invuln = 1e9;
+game.asteroids.forEach((a) => { a.x = 550; a.y = 550; a.vx = 0; a.vy = 0; });
+game.ship.speedLevel = 2;
+for (let i = 0; i < 120; i++) game.update(dt); // 2s to settle
+const speed = Math.hypot(game.ship.vx, game.ship.vy);
+check(`ship cruises at level 2 = ${(2 * CFG.ship.speedStep)} px/s (got ${speed.toFixed(0)})`,
+  Math.abs(speed - 2 * CFG.ship.speedStep) < 5);
+
+// 8. Long random run: no crashes across deaths, waves, respawns.
 game.newGame();
 for (let i = 0; i < 60 * 60; i++) game.update(dt); // 1 minute
 check('60s unattended run completes without error', true);
