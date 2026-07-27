@@ -45,8 +45,9 @@ export class Input {
 
 // Discrete swipe controls, matched to how the Neural Band delivers
 // input (single key taps, no holds):
-//   left/right — toggle continuous rotation (same again stops,
-//                opposite reverses)
+//   left/right — step the spin state one notch: swiping against the
+//                current rotation stops it, swiping again starts the
+//                turn the other way; swiping with it is a no-op
 //   up/down    — step the ship's speed level up or down
 // Firing is not a control: the ship always auto-fires while alive.
 export class Controls {
@@ -62,8 +63,11 @@ export class Controls {
   // Returns { rotate, speedDelta } for this frame.
   update() {
     const { input } = this;
-    if (input.pressed(Keys.LEFT)) this.rotate = this.rotate === -1 ? 0 : -1;
-    if (input.pressed(Keys.RIGHT)) this.rotate = this.rotate === 1 ? 0 : 1;
+    const spinStep =
+      (input.pressed(Keys.RIGHT) ? 1 : 0) - (input.pressed(Keys.LEFT) ? 1 : 0);
+    if (spinStep !== 0) {
+      this.rotate = Math.max(-1, Math.min(1, this.rotate + spinStep));
+    }
     return {
       rotate: this.rotate,
       speedDelta:

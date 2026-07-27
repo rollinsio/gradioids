@@ -21,7 +21,7 @@ Controls (desktop = glasses):
 
 | Key | Neural Band | In game |
 | --- | --- | --- |
-| ← / → | swipe left/right | toggle rotation (same again stops, opposite reverses) |
+| ← / → | swipe left/right | step the spin: against the turn stops, again reverses |
 | ↑ | swipe up | speed level +1 |
 | ↓ | swipe down | speed level −1 |
 | Enter | index pinch | select (menus) |

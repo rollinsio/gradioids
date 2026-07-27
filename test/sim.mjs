@@ -82,6 +82,23 @@ game.asteroids.push(rock);
 game.update(dt);
 check('death clears orbs (Gradius rules)', game.orbs.length === 0);
 
+// 6b. Rotation stepping: opposite swipe brakes to a stop, a second
+// one reverses, same-direction is a no-op.
+const { Controls } = await import('../js/input.js');
+const fakeInput = {
+  keys: new Set(),
+  pressed(k) { return this.keys.has(k); },
+};
+const ctl = new Controls(fakeInput);
+fakeInput.keys = new Set(['ArrowRight']);
+check('right swipe starts right spin', ctl.update().rotate === 1);
+fakeInput.keys = new Set(['ArrowLeft']);
+check('opposite swipe stops the spin', ctl.update().rotate === 0);
+fakeInput.keys = new Set(['ArrowLeft']);
+check('second left swipe reverses', ctl.update().rotate === -1);
+fakeInput.keys = new Set(['ArrowLeft']);
+check('same-direction swipe is a no-op', ctl.update().rotate === -1);
+
 // 7. Stepped drive: the ship cruises at speedLevel * speedStep.
 game.newGame();
 game.ship.invuln = 1e9;
