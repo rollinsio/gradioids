@@ -1,6 +1,7 @@
 import { CFG } from './config.js';
 import { Input, Controls, Keys } from './input.js';
 import { Ship, Asteroid, Bullet, Orb, Pickup, collides, explosion, rand } from './entities.js';
+import { Music } from './audio.js';
 
 const HISCORE_KEY = 'gradioids.hiscore';
 
@@ -9,6 +10,7 @@ export class Game {
     this.ctx = canvas.getContext('2d');
     this.input = new Input();
     this.controls = new Controls(this.input);
+    this.music = new Music(CFG.audio.music);
     this.hiscore = Number(localStorage.getItem(HISCORE_KEY)) || 0;
     this.state = 'menu';
     this.menuIndex = 0;
@@ -34,6 +36,7 @@ export class Game {
     this.newHiscore = false;
     this.controls.reset();
     this.startWave();
+    this.music.play();
     this.state = 'playing';
   }
 
@@ -94,14 +97,19 @@ export class Game {
     this.menuNav(3);
     if (this.input.pressed(Keys.BACK)) {
       this.state = 'playing';
+      this.music.play();
       return;
     }
     if (this.input.pressed(Keys.SELECT)) {
-      if (this.menuIndex === 0) this.state = 'playing';
-      else if (this.menuIndex === 1) this.newGame();
-      else {
+      if (this.menuIndex === 0) {
+        this.state = 'playing';
+        this.music.play();
+      } else if (this.menuIndex === 1) {
+        this.newGame();
+      } else {
         this.state = 'menu';
         this.menuIndex = 0;
+        this.music.stop();
       }
     }
   }
@@ -119,6 +127,7 @@ export class Game {
     if (this.input.pressed(Keys.BACK)) {
       this.state = 'paused';
       this.menuIndex = 0;
+      this.music.pause();
       return;
     }
 
@@ -212,6 +221,7 @@ export class Game {
         this.lives -= 1;
         if (this.lives <= 0) {
           this.state = 'gameover';
+          this.music.stop();
           return;
         }
         this.respawnTimer = CFG.ship.respawnDelay;

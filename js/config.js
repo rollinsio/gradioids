@@ -51,6 +51,11 @@ export const CFG = {
     clearDelay: 2.0,      // s pause between waves
   },
 
+  audio: {
+    music: 'assets/nebula-whip-run.mp3',
+    musicVolume: 0.6,
+  },
+
   // Additive display: black is transparent, so everything visible
   // must be bright and high-contrast.
   colors: {
