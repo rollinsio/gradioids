@@ -1,0 +1,405 @@
+import { CFG } from './config.js';
+import { Input, Controls, Keys } from './input.js';
+import { Ship, Asteroid, Bullet, Orb, Pickup, collides, explosion, rand } from './entities.js';
+
+const SETTINGS_KEY = 'gradioids.settings';
+const HISCORE_KEY = 'gradioids.hiscore';
+
+const DEFAULT_SETTINGS = { scheme: 'hold' };
+
+function loadJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? { ...fallback, ...JSON.parse(raw) } : { ...fallback };
+  } catch {
+    return { ...fallback };
+  }
+}
+
+export class Game {
+  constructor(canvas) {
+    this.ctx = canvas.getContext('2d');
+    this.input = new Input();
+    this.settings = loadJSON(SETTINGS_KEY, DEFAULT_SETTINGS);
+    this.controls = new Controls(this.input, this.settings);
+    this.hiscore = Number(localStorage.getItem(HISCORE_KEY)) || 0;
+    this.state = 'menu';
+    this.menuIndex = 0;
+    this.time = 0;
+  }
+
+  saveSettings() {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
+    } catch { /* storage full or unavailable — settings just won't persist */ }
+  }
+
+  // ---- run state -----------------------------------------------------
+
+  newGame() {
+    this.ship = new Ship();
+    this.asteroids = [];
+    this.bullets = [];
+    this.particles = [];
+    this.orbs = [];
+    this.pickups = [];
+    this.shipTrail = [];
+    this.score = 0;
+    this.lives = CFG.ship.lives;
+    this.wave = 0;
+    this.fireCooldown = 0;
+    this.respawnTimer = 0;
+    this.waveTimer = 0;
+    this.newHiscore = false;
+    this.controls.reset();
+    this.startWave();
+    this.state = 'playing';
+  }
+
+  addScore(points) {
+    this.score += points;
+    if (this.score > this.hiscore) {
+      this.hiscore = this.score;
+      this.newHiscore = true;
+      try {
+        localStorage.setItem(HISCORE_KEY, String(this.hiscore));
+      } catch { /* non-fatal */ }
+    }
+  }
+
+  startWave() {
+    this.wave += 1;
+    const count = Math.min(
+      CFG.wave.baseCount + (this.wave - 1) * CFG.wave.perWave,
+      CFG.wave.maxCount
+    );
+    for (let i = 0; i < count; i++) {
+      let x, y;
+      do {
+        x = rand(0, CFG.W);
+        y = rand(0, CFG.H);
+      } while (Math.hypot(x - CFG.W / 2, y - CFG.H / 2) < CFG.wave.safeRadius);
+      this.asteroids.push(new Asteroid(CFG.asteroidTiers.length - 1, x, y));
+    }
+  }
+
+  update(dt) {
+    this.time += dt;
+    switch (this.state) {
+      case 'menu': this.updateMenu(); break;
+      case 'settings': this.updateSettings(); break;
+      case 'playing': this.updatePlaying(dt); break;
+      case 'paused': this.updatePaused(); break;
+      case 'gameover': this.updateGameover(); break;
+    }
+    this.input.endFrame();
+  }
+
+  // ---- menus ---------------------------------------------------------
+
+  menuNav(length) {
+    if (this.input.pressed(Keys.UP)) {
+      this.menuIndex = (this.menuIndex + length - 1) % length;
+    }
+    if (this.input.pressed(Keys.DOWN)) {
+      this.menuIndex = (this.menuIndex + 1) % length;
+    }
+  }
+
+  updateMenu() {
+    this.menuNav(2);
+    if (this.input.pressed(Keys.SELECT)) {
+      if (this.menuIndex === 0) this.newGame();
+      else {
+        this.state = 'settings';
+        this.menuIndex = 0;
+      }
+    }
+  }
+
+  updateSettings() {
+    this.menuNav(2);
+    const toggle = () => {
+      if (this.menuIndex === 0) {
+        this.settings.scheme = this.settings.scheme === 'hold' ? 'tap' : 'hold';
+        this.saveSettings();
+      } else {
+        this.state = 'menu';
+        this.menuIndex = 0;
+      }
+    };
+    if (this.input.pressed(Keys.SELECT)) toggle();
+    if (this.menuIndex === 0 && (this.input.pressed(Keys.LEFT) || this.input.pressed(Keys.RIGHT))) {
+      toggle();
+    }
+    if (this.input.pressed(Keys.BACK)) {
+      this.state = 'menu';
+      this.menuIndex = 0;
+    }
+  }
+
+  updatePaused() {
+    this.menuNav(3);
+    if (this.input.pressed(Keys.BACK)) {
+      this.state = 'playing';
+      return;
+    }
+    if (this.input.pressed(Keys.SELECT)) {
+      if (this.menuIndex === 0) this.state = 'playing';
+      else if (this.menuIndex === 1) this.newGame();
+      else {
+        this.state = 'menu';
+        this.menuIndex = 0;
+      }
+    }
+  }
+
+  updateGameover() {
+    if (this.input.pressed(Keys.SELECT) || this.input.pressed(Keys.BACK)) {
+      this.state = 'menu';
+      this.menuIndex = 0;
+    }
+  }
+
+  // ---- gameplay ------------------------------------------------------
+
+  updatePlaying(dt) {
+    if (this.input.pressed(Keys.BACK)) {
+      this.state = 'paused';
+      this.menuIndex = 0;
+      return;
+    }
+
+    const shipAlive = this.respawnTimer <= 0;
+    const c = shipAlive ? this.controls.update() : { rotate: 0, thrust: false };
+
+    if (shipAlive) {
+      this.ship.update(dt, c);
+      this.shipTrail.push({ t: this.time, x: this.ship.x, y: this.ship.y });
+      const maxDelay = (CFG.orb.max + 1) * CFG.orb.trailDelay;
+      while (this.shipTrail.length && this.shipTrail[0].t < this.time - maxDelay) {
+        this.shipTrail.shift();
+      }
+      this.fireCooldown -= dt;
+      // The ship's cannon is fully automatic — no fire button. The
+      // on-screen cap only counts the ship's own shots, not orb shots.
+      const shipShots = this.bullets.reduce((n, b) => n + (b.fromOrb ? 0 : 1), 0);
+      if (this.fireCooldown <= 0 && shipShots < CFG.bullet.max) {
+        this.bullets.push(Bullet.fromShip(this.ship));
+        this.fireCooldown = CFG.bullet.cooldown;
+      }
+      for (const orb of this.orbs) {
+        orb.follow(this.shipTrail, this.time);
+        orb.cooldown -= dt;
+        if (orb.cooldown <= 0 && this.asteroids.length > 0) {
+          const target = orb.nearestTarget(this.asteroids);
+          const angle = Math.atan2(target.y - orb.y, target.x - orb.x);
+          const shot = new Bullet(orb.x, orb.y, angle);
+          shot.fromOrb = true;
+          this.bullets.push(shot);
+          orb.cooldown = CFG.orb.cooldown;
+        }
+      }
+    } else {
+      this.respawnTimer -= dt;
+      if (this.respawnTimer <= 0) {
+        this.ship.reset();
+        this.controls.reset();
+      }
+    }
+
+    this.asteroids.forEach((a) => a.update(dt));
+    this.bullets.forEach((b) => b.update(dt));
+    this.particles.forEach((p) => p.update(dt));
+    this.pickups.forEach((p) => p.update(dt));
+    this.bullets = this.bullets.filter((b) => !b.dead);
+    this.particles = this.particles.filter((p) => !p.dead);
+    this.pickups = this.pickups.filter((p) => !p.dead);
+
+    // Collect orb pickups.
+    if (shipAlive) {
+      for (const pickup of this.pickups) {
+        if (!collides(this.ship, pickup)) continue;
+        pickup.life = 0;
+        if (this.orbs.length < CFG.orb.max) {
+          this.orbs.push(new Orb(this.orbs.length, this.ship.x, this.ship.y));
+        } else {
+          this.addScore(CFG.orb.surplusScore);
+        }
+        explosion(this.particles, pickup.x, pickup.y, CFG.colors.pickup, 8);
+      }
+      this.pickups = this.pickups.filter((p) => !p.dead);
+    }
+
+    // Bullets vs asteroids.
+    for (const bullet of this.bullets) {
+      const hit = this.asteroids.find((a) => collides(bullet, a));
+      if (!hit) continue;
+      bullet.life = 0;
+      this.asteroids.splice(this.asteroids.indexOf(hit), 1);
+      this.asteroids.push(...hit.split());
+      this.addScore(hit.score);
+      if (Math.random() < CFG.orb.dropChance) {
+        this.pickups.push(new Pickup(hit.x, hit.y));
+      }
+      explosion(this.particles, hit.x, hit.y, CFG.colors.asteroid);
+    }
+    this.bullets = this.bullets.filter((b) => !b.dead);
+
+    // Ship vs asteroids.
+    if (shipAlive && this.ship.invuln <= 0) {
+      const hit = this.asteroids.find((a) => collides(this.ship, a));
+      if (hit) {
+        explosion(this.particles, this.ship.x, this.ship.y, CFG.colors.ship, 24);
+        this.orbs = [];       // classic Gradius rules: options die with you
+        this.shipTrail = [];
+        this.lives -= 1;
+        if (this.lives <= 0) {
+          this.state = 'gameover';
+          return;
+        }
+        this.respawnTimer = CFG.ship.respawnDelay;
+      }
+    }
+
+    // Wave cleared?
+    if (this.asteroids.length === 0) {
+      this.waveTimer += dt;
+      if (this.waveTimer >= CFG.wave.clearDelay) {
+        this.waveTimer = 0;
+        this.startWave();
+      }
+    }
+  }
+
+  // ---- rendering -----------------------------------------------------
+
+  render() {
+    const { ctx } = this;
+    ctx.clearRect(0, 0, CFG.W, CFG.H);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, CFG.W, CFG.H);
+
+    switch (this.state) {
+      case 'menu': this.renderMenu(); break;
+      case 'settings': this.renderSettings(); break;
+      case 'playing':
+      case 'paused':
+      case 'gameover':
+        this.renderWorld();
+        if (this.state === 'paused') this.renderPaused();
+        if (this.state === 'gameover') this.renderGameover();
+        break;
+    }
+  }
+
+  text(str, x, y, { size = 20, color = CFG.colors.text, align = 'center', glow = 0 } = {}) {
+    const { ctx } = this;
+    ctx.save();
+    ctx.font = `${size}px "Courier New", monospace`;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = 'middle';
+    if (glow) {
+      ctx.shadowColor = color;
+      ctx.shadowBlur = glow;
+    }
+    ctx.fillText(str, x, y);
+    ctx.restore();
+  }
+
+  menuList(items, startY, gap = 44) {
+    items.forEach((label, i) => {
+      const selected = i === this.menuIndex;
+      const y = startY + i * gap;
+      this.text(label, CFG.W / 2, y, {
+        size: 24,
+        color: selected ? CFG.colors.accent : CFG.colors.dim,
+        glow: selected ? 12 : 0,
+      });
+      if (selected) {
+        this.text('▶', CFG.W / 2 - 140, y, { size: 20, color: CFG.colors.accent });
+      }
+    });
+  }
+
+  renderMenu() {
+    this.text('GRADIOIDS', CFG.W / 2, 150, { size: 52, color: CFG.colors.accent, glow: 18 });
+    this.text(`HIGH SCORE  ${this.hiscore}`, CFG.W / 2, 215, { size: 18, color: CFG.colors.dim });
+    this.menuList(['START', 'SETTINGS'], 310);
+    this.text('swipe: aim · pinch: select', CFG.W / 2, 520, { size: 16, color: CFG.colors.dim });
+  }
+
+  renderSettings() {
+    this.text('SETTINGS', CFG.W / 2, 130, { size: 36, color: CFG.colors.accent, glow: 12 });
+    const scheme = this.settings.scheme === 'hold' ? 'HOLD' : 'TAP-TOGGLE';
+    this.menuList([`CONTROLS: ${scheme}`, 'BACK'], 260);
+    const help = this.settings.scheme === 'hold'
+      ? 'hold keys to steer & thrust'
+      : 'tap toggles rotate/thrust · down = stop';
+    this.text(help, CFG.W / 2, 460, { size: 16, color: CFG.colors.dim });
+    this.text('your ship fires automatically', CFG.W / 2, 490, {
+      size: 16, color: CFG.colors.dim,
+    });
+  }
+
+  renderWorld() {
+    const { ctx } = this;
+    this.particles.forEach((p) => p.draw(ctx));
+    this.asteroids.forEach((a) => a.draw(ctx));
+    this.pickups.forEach((p) => p.draw(ctx, this.time));
+    this.bullets.forEach((b) => b.draw(ctx));
+    if (this.state !== 'gameover' && this.respawnTimer <= 0) {
+      this.orbs.forEach((o) => o.draw(ctx, this.time));
+      this.ship.draw(ctx, this.time);
+    }
+
+    // HUD
+    this.text(`${this.score}`, 16, 26, { size: 22, align: 'left', glow: 6 });
+    this.text(`WAVE ${this.wave}`, CFG.W - 16, 26, { size: 18, align: 'right', color: CFG.colors.dim });
+    for (let i = 0; i < this.lives; i++) {
+      ctx.save();
+      ctx.translate(24 + i * 24, 54);
+      ctx.rotate(-Math.PI / 2);
+      ctx.strokeStyle = CFG.colors.ship;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(8, 0);
+      ctx.lineTo(-6, 6);
+      ctx.lineTo(-6, -6);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if (this.state === 'playing' && this.asteroids.length === 0) {
+      this.text(`WAVE ${this.wave + 1}`, CFG.W / 2, CFG.H / 2 - 60, {
+        size: 32, color: CFG.colors.accent, glow: 14,
+      });
+    }
+  }
+
+  renderPaused() {
+    this.dimOverlay();
+    this.text('PAUSED', CFG.W / 2, 160, { size: 36, color: CFG.colors.accent, glow: 12 });
+    this.menuList(['RESUME', 'RESTART', 'EXIT TO MENU'], 270);
+  }
+
+  renderGameover() {
+    this.dimOverlay();
+    this.text('GAME OVER', CFG.W / 2, 200, { size: 44, color: CFG.colors.danger, glow: 16 });
+    this.text(`SCORE  ${this.score}`, CFG.W / 2, 280, { size: 26 });
+    if (this.newHiscore) {
+      this.text('NEW HIGH SCORE!', CFG.W / 2, 325, { size: 20, color: CFG.colors.bullet, glow: 10 });
+    } else {
+      this.text(`HIGH  ${this.hiscore}`, CFG.W / 2, 325, { size: 18, color: CFG.colors.dim });
+    }
+    this.text('pinch to continue', CFG.W / 2, 430, { size: 16, color: CFG.colors.dim });
+  }
+
+  dimOverlay() {
+    const { ctx } = this;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.fillRect(0, 0, CFG.W, CFG.H);
+  }
+}

@@ -1,0 +1,344 @@
+import { CFG } from './config.js';
+
+const TAU = Math.PI * 2;
+
+export function rand(min, max) {
+  return min + Math.random() * (max - min);
+}
+
+export function wrapPosition(e, margin) {
+  const m = margin;
+  if (e.x < -m) e.x += CFG.W + m * 2;
+  if (e.x > CFG.W + m) e.x -= CFG.W + m * 2;
+  if (e.y < -m) e.y += CFG.H + m * 2;
+  if (e.y > CFG.H + m) e.y -= CFG.H + m * 2;
+}
+
+export function collides(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  const r = a.radius + b.radius;
+  return dx * dx + dy * dy < r * r;
+}
+
+export class Ship {
+  constructor() {
+    this.radius = CFG.ship.radius;
+    this.reset();
+  }
+
+  reset() {
+    this.x = CFG.W / 2;
+    this.y = CFG.H / 2;
+    this.vx = 0;
+    this.vy = 0;
+    this.angle = -Math.PI / 2;
+    this.invuln = CFG.ship.invulnTime;
+    this.thrusting = false;
+  }
+
+  update(dt, controls) {
+    const c = CFG.ship;
+    this.angle += controls.rotate * c.turnRate * dt;
+    this.thrusting = controls.thrust;
+    if (controls.thrust) {
+      this.vx += Math.cos(this.angle) * c.thrust * dt;
+      this.vy += Math.sin(this.angle) * c.thrust * dt;
+    }
+    const decay = Math.exp(-c.drag * dt);
+    this.vx *= decay;
+    this.vy *= decay;
+    const speed = Math.hypot(this.vx, this.vy);
+    if (speed > c.maxSpeed) {
+      this.vx *= c.maxSpeed / speed;
+      this.vy *= c.maxSpeed / speed;
+    }
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    wrapPosition(this, this.radius);
+    if (this.invuln > 0) this.invuln -= dt;
+  }
+
+  draw(ctx, t) {
+    // Blink while invulnerable.
+    if (this.invuln > 0 && Math.floor(t * 8) % 2 === 0) return;
+    const { x, y, angle } = this;
+    const r = this.radius;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.strokeStyle = CFG.colors.ship;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = CFG.colors.ship;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(r * 1.3, 0);
+    ctx.lineTo(-r * 0.9, r * 0.8);
+    ctx.lineTo(-r * 0.5, 0);
+    ctx.lineTo(-r * 0.9, -r * 0.8);
+    ctx.closePath();
+    ctx.stroke();
+    if (this.thrusting && Math.floor(t * 20) % 2 === 0) {
+      ctx.strokeStyle = CFG.colors.thrust;
+      ctx.shadowColor = CFG.colors.thrust;
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.7, r * 0.4);
+      ctx.lineTo(-r * 1.6, 0);
+      ctx.lineTo(-r * 0.7, -r * 0.4);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+export class Asteroid {
+  constructor(tier, x, y) {
+    const spec = CFG.asteroidTiers[tier];
+    this.tier = tier;
+    this.radius = spec.radius;
+    this.score = spec.score;
+    this.x = x;
+    this.y = y;
+    const speed = rand(spec.speed[0], spec.speed[1]);
+    const dir = rand(0, TAU);
+    this.vx = Math.cos(dir) * speed;
+    this.vy = Math.sin(dir) * speed;
+    this.angle = rand(0, TAU);
+    this.spin = rand(-1.2, 1.2);
+    // Jagged polygon outline, fixed at creation.
+    const n = 9 + tier * 2;
+    this.points = Array.from({ length: n }, (_, i) => {
+      const a = (i / n) * TAU;
+      const rr = this.radius * rand(0.72, 1.18);
+      return [Math.cos(a) * rr, Math.sin(a) * rr];
+    });
+  }
+
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.angle += this.spin * dt;
+    wrapPosition(this, this.radius);
+  }
+
+  split() {
+    if (this.tier === 0) return [];
+    return [
+      new Asteroid(this.tier - 1, this.x, this.y),
+      new Asteroid(this.tier - 1, this.x, this.y),
+    ];
+  }
+
+  draw(ctx) {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.angle);
+    ctx.strokeStyle = CFG.colors.asteroid;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = CFG.colors.asteroid;
+    ctx.shadowBlur = 5;
+    ctx.beginPath();
+    this.points.forEach(([px, py], i) => {
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+export class Bullet {
+  constructor(x, y, angle, vx0 = 0, vy0 = 0) {
+    const b = CFG.bullet;
+    this.radius = b.radius;
+    this.x = x;
+    this.y = y;
+    this.vx = vx0 + Math.cos(angle) * b.speed;
+    this.vy = vy0 + Math.sin(angle) * b.speed;
+    this.life = b.life;
+  }
+
+  static fromShip(ship) {
+    return new Bullet(
+      ship.x + Math.cos(ship.angle) * ship.radius * 1.3,
+      ship.y + Math.sin(ship.angle) * ship.radius * 1.3,
+      ship.angle,
+      ship.vx,
+      ship.vy
+    );
+  }
+
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.life -= dt;
+    wrapPosition(this, this.radius);
+  }
+
+  get dead() {
+    return this.life <= 0;
+  }
+
+  draw(ctx) {
+    const color = this.fromOrb ? CFG.colors.orb : CFG.colors.bullet;
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, TAU);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+}
+
+// Short-lived line fragments for explosions.
+export class Particle {
+  constructor(x, y, color) {
+    this.x = x;
+    this.y = y;
+    const speed = rand(40, 180);
+    const dir = rand(0, TAU);
+    this.vx = Math.cos(dir) * speed;
+    this.vy = Math.sin(dir) * speed;
+    this.angle = rand(0, TAU);
+    this.spin = rand(-6, 6);
+    this.len = rand(3, 9);
+    this.life = rand(0.35, 0.8);
+    this.maxLife = this.life;
+    this.color = color;
+  }
+
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.angle += this.spin * dt;
+    this.life -= dt;
+  }
+
+  get dead() {
+    return this.life <= 0;
+  }
+
+  draw(ctx) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(this.life / this.maxLife, 0);
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.angle);
+    ctx.strokeStyle = this.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-this.len / 2, 0);
+    ctx.lineTo(this.len / 2, 0);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+export function explosion(particles, x, y, color, count = 14) {
+  for (let i = 0; i < count; i++) particles.push(new Particle(x, y, color));
+}
+
+// Gradius-style option: trails the ship and auto-fires at the nearest
+// asteroid, at a fraction of the ship's fire rate (CFG.orb.cooldown).
+export class Orb {
+  constructor(slot, x, y) {
+    this.slot = slot;     // 0-based position in the trail
+    this.radius = CFG.orb.radius;
+    this.x = x;
+    this.y = y;
+    this.cooldown = 0;
+  }
+
+  // Sit where the ship was (slot+1)*trailDelay seconds ago. Samples
+  // are per-frame, so nearest-sample is smooth enough — no interpolation,
+  // which also avoids sweeping across the screen when the ship wraps.
+  follow(trail, now) {
+    const target = now - (this.slot + 1) * CFG.orb.trailDelay;
+    for (let i = trail.length - 1; i >= 0; i--) {
+      if (trail[i].t <= target) {
+        this.x = trail[i].x;
+        this.y = trail[i].y;
+        return;
+      }
+    }
+    if (trail.length) {
+      this.x = trail[0].x;
+      this.y = trail[0].y;
+    }
+  }
+
+  nearestTarget(asteroids) {
+    let best = null;
+    let bestD = Infinity;
+    for (const a of asteroids) {
+      const d = (a.x - this.x) ** 2 + (a.y - this.y) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = a;
+      }
+    }
+    return best;
+  }
+
+  draw(ctx, t) {
+    const pulse = 1 + 0.15 * Math.sin(t * 6 + this.slot * 2);
+    ctx.save();
+    ctx.strokeStyle = CFG.colors.orb;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = CFG.colors.orb;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius * pulse, 0, TAU);
+    ctx.stroke();
+    ctx.fillStyle = CFG.colors.orb;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, 2, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// Dropped by destroyed asteroids; fly into it to gain an orb.
+export class Pickup {
+  constructor(x, y) {
+    this.radius = CFG.orb.pickupRadius;
+    this.x = x;
+    this.y = y;
+    const dir = rand(0, TAU);
+    const speed = rand(10, 30);
+    this.vx = Math.cos(dir) * speed;
+    this.vy = Math.sin(dir) * speed;
+    this.life = CFG.orb.pickupLife;
+  }
+
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.life -= dt;
+    wrapPosition(this, this.radius);
+  }
+
+  get dead() {
+    return this.life <= 0;
+  }
+
+  draw(ctx, t) {
+    // Blink during the final seconds before expiring.
+    if (this.life < 2 && Math.floor(t * 6) % 2 === 0) return;
+    const pulse = 1 + 0.2 * Math.sin(t * 5);
+    ctx.save();
+    ctx.strokeStyle = CFG.colors.pickup;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = CFG.colors.pickup;
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius * pulse, 0, TAU);
+    ctx.stroke();
+    ctx.fillStyle = CFG.colors.pickup;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, 3, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+}
