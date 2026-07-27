@@ -29,10 +29,11 @@ Controls (desktop = glasses):
 The ship fires automatically — there is no fire button. Two control schemes
 are available in Settings (persisted to `localStorage`):
 
-- **Hold** — keys act while held, like a keyboard.
-- **Tap-toggle** — each press toggles rotation/thrust; ↓ is all-stop.
-  Fallback in case pinch-and-hold doesn't deliver clean keydown/keyup on
-  hardware.
+- **Tap-toggle** (default) — each press toggles rotation/thrust; ↓ is
+  all-stop. This is the scheme that works on glasses: Neural Band swipes
+  arrive as discrete key taps, not holds.
+- **Hold** — keys act while held. Better feel when playing with a real
+  keyboard in a desktop browser.
 
 ## Deploy to the glasses
 

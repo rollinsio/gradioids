@@ -5,7 +5,9 @@ import { Ship, Asteroid, Bullet, Orb, Pickup, collides, explosion, rand } from '
 const SETTINGS_KEY = 'gradioids.settings';
 const HISCORE_KEY = 'gradioids.hiscore';
 
-const DEFAULT_SETTINGS = { scheme: 'hold' };
+// 'tap' is the default: Neural Band swipes arrive as discrete key taps,
+// so the hold scheme only works with a physical keyboard.
+const DEFAULT_SETTINGS = { scheme: 'tap' };
 
 function loadJSON(key, fallback) {
   try {
