@@ -10,7 +10,8 @@ export const CFG = {
     // resets to; live tuning overwrites them in place (js/settings.js).
     turnStep: Math.PI / 4,   // rad added per swipe (45° = 1/8 of a turn)
     maxTurnQueue: Math.PI,   // rad of un-swept turn a swipe flurry can bank
-    turnRate: 3.8,        // rad/s while sweeping toward the queued angle
+    turnRate: 3.8,        // rad/s ceiling while sweeping toward the queued angle
+    turnDrift: 0.15,      // s time constant the sweep eases out over; 0 = hard stop
     speedStep: 75,        // px/s per speed level
     maxSpeedLevel: 4,     // up-swipes past this do nothing
     accel: 3.5,           // 1/s exponential approach to the target speed

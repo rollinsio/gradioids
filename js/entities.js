@@ -2,6 +2,10 @@ import { CFG } from './config.js';
 
 const TAU = Math.PI * 2;
 
+// An eased turn approaches its heading asymptotically, so it needs a
+// floor to actually land on it. ~0.1° — below anything you could see.
+const TURN_SETTLE = 0.002;
+
 export function rand(min, max) {
   return min + Math.random() * (max - min);
 }
@@ -46,12 +50,26 @@ export class Ship {
   // Steering is stepped too: each swipe banks turnStep radians and the
   // ship sweeps through them at turnRate, so it comes to rest pointing
   // where you aimed it instead of spinning until you swipe back.
+  //
+  // The sweep eases out rather than stopping dead: what is left of the
+  // turn decays with time constant turnDrift, so the ship comes off a
+  // swipe fast and coasts the last few degrees. turnRate still caps how
+  // fast it can rotate, which is what a stack of swipes runs into
+  // first — they turn flat out, then drift into the final heading.
+  // turnDrift = 0 disables the tail and restores a hard stop.
   update(dt, controls) {
     const c = CFG.ship;
     this.turnQueue += (controls.turn || 0) * c.turnStep;
     this.turnQueue = Math.max(-c.maxTurnQueue, Math.min(c.maxTurnQueue, this.turnQueue));
-    const sweep = Math.min(Math.abs(this.turnQueue), c.turnRate * dt);
-    if (sweep > 0) {
+    const left = Math.abs(this.turnQueue);
+    if (left > 0) {
+      const eased = c.turnDrift > 0
+        ? left * (1 - Math.exp(-dt / c.turnDrift))
+        : left;
+      // Snap up the remainder once the tail is imperceptible, so the
+      // turn terminates instead of chasing the asymptote forever.
+      let sweep = Math.min(eased, c.turnRate * dt);
+      if (left - sweep < TURN_SETTLE) sweep = left;
       const step = Math.sign(this.turnQueue) * sweep;
       this.angle += step;
       this.turnQueue -= step;

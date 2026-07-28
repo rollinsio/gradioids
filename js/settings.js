@@ -27,6 +27,14 @@ export const TUNABLES = [
     apply: (v) => { CFG.ship.turnRate = v; },
   },
   {
+    key: 'turnDrift',
+    label: 'TURN DRIFT',
+    unit: 's',
+    min: 0, max: 1, step: 0.05, decimals: 2,
+    read: () => CFG.ship.turnDrift,
+    apply: (v) => { CFG.ship.turnDrift = v; },
+  },
+  {
     key: 'turnBank',
     label: 'TURN BANK',
     unit: '°',

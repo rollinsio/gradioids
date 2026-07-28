@@ -34,10 +34,18 @@ between levels and around turns. Everything is discrete swipes — no
 held keys — because Neural Band gestures arrive as single key taps.
 
 Steering is stepped the same way: a swipe banks `CFG.ship.turnStep`
-radians and the ship sweeps through them at `CFG.ship.turnRate`, then
-holds that heading. Swipe left twice and you have turned 90° left — the
-ship never spins on its own, so you never have to swipe back to stop it.
-Rapid swipes stack, capped at `CFG.ship.maxTurnQueue`.
+radians and the ship sweeps through them, then holds that heading.
+Swipe left twice and you have turned 90° left — the ship never spins on
+its own, so you never have to swipe back to stop it. Rapid swipes
+stack, capped at `CFG.ship.maxTurnQueue`.
+
+The sweep eases out rather than stopping dead: what is left of the turn
+decays with time constant `CFG.ship.turnDrift`, so the ship comes off a
+swipe hard and coasts the last few degrees into place. `turnRate` caps
+how fast it can rotate at all, which is what a stack of swipes hits
+first — they turn flat out, then drift in. At stock values a single
+45° swipe is 90% turned in ~0.35s and fully settled by ~0.9s;
+`turnDrift = 0` removes the tail and restores a hard stop.
 
 ## Tuning it on the glasses
 
@@ -48,6 +56,7 @@ without ending a run — edits the feel knobs in place:
 | --- | --- | --- |
 | TURN / SWIPE | `ship.turnStep` | 45° |
 | TURN SPEED | `ship.turnRate` | 3.8 rad/s |
+| TURN DRIFT | `ship.turnDrift` | 0.15 s |
 | TURN BANK | `ship.maxTurnQueue` | 180° |
 | SPEED / LEVEL | `ship.speedStep` | 75 px/s |
 | TOP SPEED | `ship.maxSpeedLevel` | 4 |

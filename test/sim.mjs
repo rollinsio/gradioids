@@ -178,7 +178,55 @@ for (let i = 0; i < 600; i++) flurry.update(dt, { turn: 0, speedDelta: 0 });
 check(`swipe flurry banks at most ${CFG.ship.maxTurnQueue.toFixed(2)} rad`,
   flurry.angle - flurryStart <= CFG.ship.maxTurnQueue + 60 * dt * CFG.ship.turnRate + 1e-9);
 
-// 6d. Controls screen: ←→ adjusts the highlighted knob, the change is
+// 6d. Drift: the sweep eases out instead of stopping dead, and still
+// lands on exactly the angle the swipe asked for.
+const sweepSteps = (ship, frames = 400) => {
+  const steps = [];
+  for (let i = 0; i < frames && ship.turnQueue !== 0; i++) {
+    const before = ship.angle;
+    ship.update(dt, { turn: 0, speedDelta: 0 });
+    steps.push(ship.angle - before);
+  }
+  return steps;
+};
+
+const drifter = new Ship();
+const driftStart = drifter.angle;
+drifter.update(dt, { turn: 1, speedDelta: 0 });
+const driftSteps = sweepSteps(drifter);
+check('an eased turn settles in finite time', drifter.turnQueue === 0);
+check('a drifting swipe still lands exactly turnStep away',
+  Math.abs((drifter.angle - driftStart) - CFG.ship.turnStep) < 1e-9);
+// Ignore the last entry: that is the settle snap, not part of the curve.
+const curve = driftSteps.slice(0, -1);
+check('the turn decelerates the whole way through',
+  curve.every((s, i) => i === 0 || s <= curve[i - 1] + 1e-12));
+check(`the tail is far slower than the launch (${curve[0].toFixed(4)} → ${curve.at(-1).toFixed(4)} rad/frame)`,
+  curve.at(-1) < curve[0] / 4);
+
+// With drift off it is the old hard stop: flat out, then nothing.
+const driftDefault = CFG.ship.turnDrift;
+CFG.ship.turnDrift = 0;
+const hardStop = new Ship();
+hardStop.update(dt, { turn: 1, speedDelta: 0 });
+const hardSteps = sweepSteps(hardStop).slice(0, -1);
+check('turn drift 0 restores a constant-rate sweep',
+  hardSteps.every((s) => Math.abs(s - CFG.ship.turnRate * dt) < 1e-12));
+check('a hard-stop turn is shorter than a drifting one',
+  hardSteps.length < curve.length);
+CFG.ship.turnDrift = driftDefault;
+
+// turnRate still caps the rotation, so stacked swipes turn flat out
+// before they drift in.
+const stacked = new Ship();
+for (let i = 0; i < 4; i++) stacked.update(dt, { turn: 1, speedDelta: 0 });
+const stackedSteps = sweepSteps(stacked);
+check(`turn rate still caps a stacked turn at ${CFG.ship.turnRate} rad/s`,
+  Math.max(...stackedSteps) <= CFG.ship.turnRate * dt + 1e-12);
+check('a stacked turn starts at the cap',
+  Math.abs(stackedSteps[0] - CFG.ship.turnRate * dt) < 1e-12);
+
+// 6e. Controls screen: ←→ adjusts the highlighted knob, the change is
 // live in CFG, it persists, and RESET DEFAULTS puts it back.
 const { TUNABLES, DEFAULTS } = await import('../js/settings.js');
 const turnKnob = TUNABLES.find((t) => t.key === 'turnStep');
