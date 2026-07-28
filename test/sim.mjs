@@ -1,7 +1,11 @@
 // Headless smoke test: drive the Game through real frames with a
 // stubbed DOM and assert orb pickup/follow/fire behavior.
 globalThis.window = { addEventListener: () => {} };
-globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+const store = new Map();
+globalThis.localStorage = {
+  getItem: (k) => (store.has(k) ? store.get(k) : null),
+  setItem: (k, v) => store.set(k, String(v)),
+};
 
 const ctxStub = new Proxy({}, {
   get: () => () => {},
@@ -173,6 +177,75 @@ for (let i = 0; i < 60; i++) flurry.update(dt, { turn: 1, speedDelta: 0 });
 for (let i = 0; i < 600; i++) flurry.update(dt, { turn: 0, speedDelta: 0 });
 check(`swipe flurry banks at most ${CFG.ship.maxTurnQueue.toFixed(2)} rad`,
   flurry.angle - flurryStart <= CFG.ship.maxTurnQueue + 60 * dt * CFG.ship.turnRate + 1e-9);
+
+// 6d. Controls screen: ←→ adjusts the highlighted knob, the change is
+// live in CFG, it persists, and RESET DEFAULTS puts it back.
+const { TUNABLES, DEFAULTS } = await import('../js/settings.js');
+const turnKnob = TUNABLES.find((t) => t.key === 'turnStep');
+const press = (key) => {
+  game.input.edgeKeys = new Set(key ? [key] : []);
+  game.update(dt);
+};
+
+game.state = 'menu';
+game.menuIndex = 1;
+press('Enter');
+check('menu opens the controls screen', game.state === 'controls');
+check('controls screen starts on the first knob', game.controlsIndex === 0);
+
+const stepBefore = game.settings.values.turnStep;
+press('ArrowRight');
+check(`right swipe raises turn/swipe by ${turnKnob.step}° (${stepBefore} → ${game.settings.values.turnStep})`,
+  game.settings.values.turnStep === stepBefore + turnKnob.step);
+check('the change is live in CFG',
+  Math.abs(CFG.ship.turnStep - game.settings.values.turnStep * (Math.PI / 180)) < 1e-12);
+press('ArrowLeft');
+press('ArrowLeft');
+check('left swipes lower it again', game.settings.values.turnStep === stepBefore - turnKnob.step);
+check('the new value is saved', JSON.parse(store.get('gradioids.settings')).turnStep
+  === stepBefore - turnKnob.step);
+
+for (let i = 0; i < 40; i++) press('ArrowLeft');
+check(`turn/swipe floors at ${turnKnob.min}°`, game.settings.values.turnStep === turnKnob.min);
+for (let i = 0; i < 60; i++) press('ArrowRight');
+check(`turn/swipe ceils at ${turnKnob.max}°`, game.settings.values.turnStep === turnKnob.max);
+check('an off-default knob is flagged', game.settings.isDefault(turnKnob) === false);
+
+// Lowering TOP SPEED has to pull an already-faster ship back down.
+game.controlsIndex = TUNABLES.findIndex((t) => t.key === 'maxSpeedLevel');
+for (let i = 0; i < 10; i++) press('ArrowLeft');
+check('top speed floors at 1', CFG.ship.maxSpeedLevel === 1);
+game.state = 'playing';
+game.respawnTimer = 0;      // the death test above left one pending
+game.ship.invuln = 1e9;
+game.ship.speedLevel = 4;
+game.update(dt);
+check('lowering top speed clamps the flying ship', game.ship.speedLevel === 1);
+
+// Back out, then reset everything from the pause menu route.
+game.state = 'controls';
+game.controlsIndex = TUNABLES.length;   // RESET DEFAULTS
+press('Enter');
+check('reset restores every default',
+  TUNABLES.every((t) => game.settings.values[t.key] === DEFAULTS[t.key]));
+check('reset is applied to CFG', CFG.ship.maxSpeedLevel === DEFAULTS.maxSpeedLevel
+  && Math.abs(CFG.ship.turnStep - DEFAULTS.turnStep * (Math.PI / 180)) < 1e-12);
+game.controlsIndex = TUNABLES.length + 1;   // BACK
+game.controlsReturn = 'paused';
+press('Enter');
+check('BACK returns where the screen was opened from', game.state === 'paused');
+game.state = 'controls';
+press('Escape');
+check('escape also backs out', game.state === 'paused');
+
+// Saved values survive a reload.
+game.settings.values.turnStep = 60;
+game.settings.save();
+const { Settings } = await import('../js/settings.js');
+const reloaded = new Settings();
+check('settings reload from storage', reloaded.values.turnStep === 60
+  && Math.abs(CFG.ship.turnStep - 60 * (Math.PI / 180)) < 1e-12);
+reloaded.reset();
 
 // 7. Stepped drive: the ship cruises at speedLevel * speedStep.
 game.newGame();

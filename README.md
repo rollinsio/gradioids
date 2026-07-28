@@ -21,7 +21,7 @@ Controls (desktop = glasses):
 
 | Key | Neural Band | In game |
 | --- | --- | --- |
-| ← / → | swipe left/right | turn a step (`CFG.ship.turnStep`, 30° by default) that way |
+| ← / → | swipe left/right | turn one step that way (45° by default, tunable) |
 | ↑ | swipe up | speed level +1 |
 | ↓ | swipe down | speed level −1 |
 | Enter | index pinch | select (menus) |
@@ -35,9 +35,31 @@ held keys — because Neural Band gestures arrive as single key taps.
 
 Steering is stepped the same way: a swipe banks `CFG.ship.turnStep`
 radians and the ship sweeps through them at `CFG.ship.turnRate`, then
-holds that heading. Swipe left twice and you have turned 60° left — the
+holds that heading. Swipe left twice and you have turned 90° left — the
 ship never spins on its own, so you never have to swipe back to stop it.
 Rapid swipes stack, capped at `CFG.ship.maxTurnQueue`.
+
+## Tuning it on the glasses
+
+CONTROLS — on the main menu, and on the pause menu so you can adjust
+without ending a run — edits the feel knobs in place:
+
+| Row | CFG field | Default |
+| --- | --- | --- |
+| TURN / SWIPE | `ship.turnStep` | 45° |
+| TURN SPEED | `ship.turnRate` | 3.8 rad/s |
+| TURN BANK | `ship.maxTurnQueue` | 180° |
+| SPEED / LEVEL | `ship.speedStep` | 75 px/s |
+| TOP SPEED | `ship.maxSpeedLevel` | 4 |
+| ACCEL | `ship.accel` | 3.5/s |
+
+↑↓ picks a row, ←→ adjusts it, Escape (middle pinch) backs out. Values
+are written straight into `CFG` — a change made from pause is live the
+moment you resume — and persist in `localStorage` under
+`gradioids.settings`. RESET DEFAULTS restores what `js/config.js` says;
+values that differ from stock stay bright in the list. To add a knob,
+append an entry to `TUNABLES` in `js/settings.js`; the screen and its
+storage pick it up with no other changes.
 
 ## Deploy to the glasses
 
@@ -55,7 +77,8 @@ manifest.webmanifest  name + icon
 js/config.js          all gameplay tuning knobs
 js/input.js           key handling + hold/tap control schemes
 js/entities.js        ship, asteroids, bullets, particles
-js/game.js            state machine (menu/settings/playing/paused/gameover)
+js/settings.js        live-tunable knobs behind the CONTROLS screen
+js/game.js            state machine (menu/controls/playing/paused/gameover)
 js/main.js            rAF loop
 test/sim.mjs          headless smoke test (node test/sim.mjs)
 ```

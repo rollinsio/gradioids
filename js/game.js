@@ -2,6 +2,7 @@ import { CFG } from './config.js';
 import { Input, Controls, Keys } from './input.js';
 import { Ship, Asteroid, Bullet, Missile, Orb, Pickup, collides, explosion, rand } from './entities.js';
 import { Music } from './audio.js';
+import { Settings, TUNABLES } from './settings.js';
 
 const HISCORE_KEY = 'gradioids.hiscore';
 
@@ -11,9 +12,12 @@ export class Game {
     this.input = new Input();
     this.controls = new Controls(this.input);
     this.music = new Music(CFG.audio.music);
+    this.settings = new Settings();
     this.hiscore = Number(localStorage.getItem(HISCORE_KEY)) || 0;
     this.state = 'menu';
     this.menuIndex = 0;
+    this.controlsIndex = 0;
+    this.controlsReturn = 'menu';   // where BACK goes: menu or paused
     this.time = 0;
   }
 
@@ -132,6 +136,7 @@ export class Game {
     this.time += dt;
     switch (this.state) {
       case 'menu': this.updateMenu(); break;
+      case 'controls': this.updateControls(); break;
       case 'playing': this.updatePlaying(dt); break;
       case 'paused': this.updatePaused(); break;
       case 'gameover': this.updateGameover(); break;
@@ -151,11 +156,59 @@ export class Game {
   }
 
   updateMenu() {
-    if (this.input.pressed(Keys.SELECT)) this.newGame();
+    this.menuNav(2);
+    if (this.input.pressed(Keys.SELECT)) {
+      if (this.menuIndex === 0) this.newGame();
+      else this.openControls('menu');
+    }
+  }
+
+  openControls(returnTo) {
+    this.controlsReturn = returnTo;
+    this.controlsIndex = 0;
+    this.state = 'controls';
+  }
+
+  // Two rows past the tunables: reset, then back.
+  get controlsRowCount() {
+    return TUNABLES.length + 2;
+  }
+
+  closeControls() {
+    this.state = this.controlsReturn;
+    this.menuIndex = 0;
+  }
+
+  // ←→ adjust the highlighted value, ↑↓ move between rows. Changes go
+  // straight into CFG, so a tweak made from the pause menu is live the
+  // moment you resume.
+  updateControls() {
+    const rows = this.controlsRowCount;
+    if (this.input.pressed(Keys.UP)) {
+      this.controlsIndex = (this.controlsIndex + rows - 1) % rows;
+    }
+    if (this.input.pressed(Keys.DOWN)) {
+      this.controlsIndex = (this.controlsIndex + 1) % rows;
+    }
+    if (this.input.pressed(Keys.BACK)) {
+      this.closeControls();
+      return;
+    }
+    const tunable = TUNABLES[this.controlsIndex];
+    if (tunable) {
+      const dir =
+        (this.input.pressed(Keys.RIGHT) ? 1 : 0) - (this.input.pressed(Keys.LEFT) ? 1 : 0);
+      if (dir !== 0) this.settings.adjust(tunable, dir);
+      return;
+    }
+    if (this.input.pressed(Keys.SELECT)) {
+      if (this.controlsIndex === TUNABLES.length) this.settings.reset();
+      else this.closeControls();
+    }
   }
 
   updatePaused() {
-    this.menuNav(3);
+    this.menuNav(4);
     if (this.input.pressed(Keys.BACK)) {
       this.state = 'playing';
       this.music.play();
@@ -166,6 +219,8 @@ export class Game {
         this.state = 'playing';
         this.music.play();
       } else if (this.menuIndex === 1) {
+        this.openControls('paused');
+      } else if (this.menuIndex === 2) {
         this.newGame();
       } else {
         this.state = 'menu';
@@ -196,10 +251,10 @@ export class Game {
     const c = shipAlive ? this.controls.update() : { turn: 0, speedDelta: 0 };
 
     if (shipAlive) {
-      if (c.speedDelta !== 0) {
-        this.ship.speedLevel = Math.max(0, Math.min(
-          CFG.ship.maxSpeedLevel, this.ship.speedLevel + c.speedDelta));
-      }
+      // Clamped every frame, not just on a swipe: lowering TOP SPEED on
+      // the controls screen has to pull a faster ship back down.
+      this.ship.speedLevel = Math.max(0, Math.min(
+        CFG.ship.maxSpeedLevel, this.ship.speedLevel + c.speedDelta));
       this.ship.update(dt, c);
       this.shipTrail.push({ t: this.time, x: this.ship.x, y: this.ship.y });
       const maxDelay = (CFG.orb.max + 1) * CFG.orb.trailDelay;
@@ -330,6 +385,12 @@ export class Game {
 
     switch (this.state) {
       case 'menu': this.renderMenu(); break;
+      case 'controls':
+        // Opened from pause: keep the frozen world behind the panel so
+        // you can see the ship you are tuning.
+        if (this.controlsReturn === 'paused') this.renderWorld();
+        this.renderControls();
+        break;
       case 'playing':
       case 'paused':
       case 'gameover':
@@ -373,9 +434,46 @@ export class Game {
   renderMenu() {
     this.text('GRADIOIDS', CFG.W / 2, 150, { size: 52, color: CFG.colors.accent, glow: 18 });
     this.text(`HIGH SCORE  ${this.hiscore}`, CFG.W / 2, 215, { size: 18, color: CFG.colors.dim });
-    this.menuList(['START'], 320);
+    this.menuList(['START', 'CONTROLS'], 300);
     this.text('swipe ←→ turn · ↑↓ speed', CFG.W / 2, 490, { size: 16, color: CFG.colors.dim });
     this.text('your ship fires automatically', CFG.W / 2, 520, { size: 16, color: CFG.colors.dim });
+  }
+
+  renderControls() {
+    this.dimOverlay();
+    this.text('CONTROLS', CFG.W / 2, 70, { size: 34, color: CFG.colors.accent, glow: 12 });
+
+    const top = 140;
+    const gap = 40;
+    TUNABLES.forEach((t, i) => {
+      const selected = i === this.controlsIndex;
+      const y = top + i * gap;
+      const color = selected ? CFG.colors.accent : CFG.colors.dim;
+      this.text(t.label, 90, y, { size: 20, align: 'left', color, glow: selected ? 10 : 0 });
+      const value = this.settings.display(t);
+      this.text(selected ? `◀ ${value} ▶` : value, CFG.W - 90, y, {
+        size: 20,
+        align: 'right',
+        // A changed value stays visible as "not stock" once you move on.
+        color: selected ? CFG.colors.accent
+          : (this.settings.isDefault(t) ? CFG.colors.dim : CFG.colors.text),
+        glow: selected ? 10 : 0,
+      });
+    });
+
+    const actionsTop = top + TUNABLES.length * gap + 16;
+    ['RESET DEFAULTS', 'BACK'].forEach((label, i) => {
+      const selected = this.controlsIndex === TUNABLES.length + i;
+      this.text(label, CFG.W / 2, actionsTop + i * 36, {
+        size: 22,
+        color: selected ? CFG.colors.accent : CFG.colors.dim,
+        glow: selected ? 12 : 0,
+      });
+    });
+
+    this.text('↑↓ pick · ←→ adjust · pinch back', CFG.W / 2, CFG.H - 26, {
+      size: 15, color: CFG.colors.dim,
+    });
   }
 
   renderWorld() {
@@ -440,7 +538,7 @@ export class Game {
   renderPaused() {
     this.dimOverlay();
     this.text('PAUSED', CFG.W / 2, 160, { size: 36, color: CFG.colors.accent, glow: 12 });
-    this.menuList(['RESUME', 'RESTART', 'EXIT TO MENU'], 270);
+    this.menuList(['RESUME', 'CONTROLS', 'RESTART', 'EXIT TO MENU'], 260);
   }
 
   renderGameover() {
