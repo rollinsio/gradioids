@@ -193,7 +193,7 @@ export class Game {
     }
 
     const shipAlive = this.respawnTimer <= 0;
-    const c = shipAlive ? this.controls.update() : { rotate: 0, speedDelta: 0 };
+    const c = shipAlive ? this.controls.update() : { turn: 0, speedDelta: 0 };
 
     if (shipAlive) {
       if (c.speedDelta !== 0) {
@@ -374,7 +374,7 @@ export class Game {
     this.text('GRADIOIDS', CFG.W / 2, 150, { size: 52, color: CFG.colors.accent, glow: 18 });
     this.text(`HIGH SCORE  ${this.hiscore}`, CFG.W / 2, 215, { size: 18, color: CFG.colors.dim });
     this.menuList(['START'], 320);
-    this.text('swipe ←→ rotate · ↑↓ speed', CFG.W / 2, 490, { size: 16, color: CFG.colors.dim });
+    this.text('swipe ←→ turn · ↑↓ speed', CFG.W / 2, 490, { size: 16, color: CFG.colors.dim });
     this.text('your ship fires automatically', CFG.W / 2, 520, { size: 16, color: CFG.colors.dim });
   }
 

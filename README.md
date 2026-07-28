@@ -21,7 +21,7 @@ Controls (desktop = glasses):
 
 | Key | Neural Band | In game |
 | --- | --- | --- |
-| ← / → | swipe left/right | step the spin: against the turn stops, again reverses |
+| ← / → | swipe left/right | turn a step (`CFG.ship.turnStep`, 30° by default) that way |
 | ↑ | swipe up | speed level +1 |
 | ↓ | swipe down | speed level −1 |
 | Enter | index pinch | select (menus) |
@@ -32,6 +32,12 @@ stepped drive: the ship flies where it points at one of
 `CFG.ship.maxSpeedLevel` speed levels (HUD pips bottom-left), easing
 between levels and around turns. Everything is discrete swipes — no
 held keys — because Neural Band gestures arrive as single key taps.
+
+Steering is stepped the same way: a swipe banks `CFG.ship.turnStep`
+radians and the ship sweeps through them at `CFG.ship.turnRate`, then
+holds that heading. Swipe left twice and you have turned 60° left — the
+ship never spins on its own, so you never have to swipe back to stop it.
+Rapid swipes stack, capped at `CFG.ship.maxTurnQueue`.
 
 ## Deploy to the glasses
 

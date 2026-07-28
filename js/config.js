@@ -6,7 +6,9 @@ export const CFG = {
 
   ship: {
     radius: 12,
-    turnRate: 3.8,        // rad/s while rotating
+    turnStep: Math.PI / 6,   // rad added per swipe (30° = 1/12 of a turn)
+    maxTurnQueue: Math.PI,   // rad of un-swept turn a swipe flurry can bank
+    turnRate: 3.8,        // rad/s while sweeping toward the queued angle
     speedStep: 75,        // px/s per speed level
     maxSpeedLevel: 4,     // up-swipes past this do nothing
     accel: 3.5,           // 1/s exponential approach to the target speed

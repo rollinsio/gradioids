@@ -131,8 +131,8 @@ check('death clears orbs (Gradius rules)', game.orbs.length === 0);
 check('death clears missiles and spread too',
   !game.hasMissiles && !game.hasSpread && game.missiles.length === 0);
 
-// 6b. Rotation stepping: opposite swipe brakes to a stop, a second
-// one reverses, same-direction is a no-op.
+// 6b. Steering is per-swipe, not a latched spin: each swipe reports one
+// turn step and nothing carries over to the next frame.
 const { Controls } = await import('../js/input.js');
 const fakeInput = {
   keys: new Set(),
@@ -140,13 +140,39 @@ const fakeInput = {
 };
 const ctl = new Controls(fakeInput);
 fakeInput.keys = new Set(['ArrowRight']);
-check('right swipe starts right spin', ctl.update().rotate === 1);
+check('right swipe reports one right step', ctl.update().turn === 1);
+fakeInput.keys = new Set();
+check('no swipe means no turn (the ship does not spin on)', ctl.update().turn === 0);
 fakeInput.keys = new Set(['ArrowLeft']);
-check('opposite swipe stops the spin', ctl.update().rotate === 0);
+check('left swipe reports one left step', ctl.update().turn === -1);
 fakeInput.keys = new Set(['ArrowLeft']);
-check('second left swipe reverses', ctl.update().rotate === -1);
-fakeInput.keys = new Set(['ArrowLeft']);
-check('same-direction swipe is a no-op', ctl.update().rotate === -1);
+check('a second left swipe turns left again', ctl.update().turn === -1);
+
+// 6c. The ship sweeps through exactly turnStep radians per swipe and
+// then holds its new heading.
+const { Ship } = await import('../js/entities.js');
+const ship = new Ship();
+const startAngle = ship.angle;
+ship.update(dt, { turn: -1, speedDelta: 0 });
+for (let i = 0; i < 120; i++) ship.update(dt, { turn: 0, speedDelta: 0 });
+const swept = ship.angle - startAngle;
+check(`one left swipe turns ${CFG.ship.turnStep.toFixed(3)} rad left (got ${swept.toFixed(3)})`,
+  Math.abs(swept + CFG.ship.turnStep) < 1e-9);
+const settled = ship.angle;
+for (let i = 0; i < 120; i++) ship.update(dt, { turn: 0, speedDelta: 0 });
+check('heading holds steady with no further swipes', ship.angle === settled);
+ship.update(dt, { turn: -1, speedDelta: 0 });
+ship.update(dt, { turn: -1, speedDelta: 0 });
+for (let i = 0; i < 120; i++) ship.update(dt, { turn: 0, speedDelta: 0 });
+check('two swipes stack into two steps',
+  Math.abs((ship.angle - settled) + 2 * CFG.ship.turnStep) < 1e-9);
+// A swipe flurry is capped so the ship can never bank a runaway spin.
+const flurry = new Ship();
+const flurryStart = flurry.angle;
+for (let i = 0; i < 60; i++) flurry.update(dt, { turn: 1, speedDelta: 0 });
+for (let i = 0; i < 600; i++) flurry.update(dt, { turn: 0, speedDelta: 0 });
+check(`swipe flurry banks at most ${CFG.ship.maxTurnQueue.toFixed(2)} rad`,
+  flurry.angle - flurryStart <= CFG.ship.maxTurnQueue + 60 * dt * CFG.ship.turnRate + 1e-9);
 
 // 7. Stepped drive: the ship cruises at speedLevel * speedStep.
 game.newGame();

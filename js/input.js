@@ -45,9 +45,9 @@ export class Input {
 
 // Discrete swipe controls, matched to how the Neural Band delivers
 // input (single key taps, no holds):
-//   left/right — step the spin state one notch: swiping against the
-//                current rotation stops it, swiping again starts the
-//                turn the other way; swiping with it is a no-op
+//   left/right — turn the ship by CFG.ship.turnStep, once per swipe;
+//                the ship never spins on its own, so a swipe left
+//                always means "point a bit further left"
 //   up/down    — step the ship's speed level up or down
 // Firing is not a control: the ship always auto-fires while alive.
 export class Controls {
@@ -56,20 +56,18 @@ export class Controls {
     this.reset();
   }
 
-  reset() {
-    this.rotate = 0;      // -1 left, 0 none, 1 right
-  }
+  // Stateless between frames — the pending turn lives on the ship, which
+  // sweeps through it at CFG.ship.turnRate. Kept so callers can flush
+  // the scheme on respawn without knowing that.
+  reset() {}
 
-  // Returns { rotate, speedDelta } for this frame.
+  // Returns { turn, speedDelta } for this frame, where turn counts swipe
+  // steps: +1 per right swipe, -1 per left.
   update() {
     const { input } = this;
-    const spinStep =
-      (input.pressed(Keys.RIGHT) ? 1 : 0) - (input.pressed(Keys.LEFT) ? 1 : 0);
-    if (spinStep !== 0) {
-      this.rotate = Math.max(-1, Math.min(1, this.rotate + spinStep));
-    }
     return {
-      rotate: this.rotate,
+      turn:
+        (input.pressed(Keys.RIGHT) ? 1 : 0) - (input.pressed(Keys.LEFT) ? 1 : 0),
       speedDelta:
         (input.pressed(Keys.UP) ? 1 : 0) - (input.pressed(Keys.DOWN) ? 1 : 0),
     };

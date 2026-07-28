@@ -33,6 +33,7 @@ export class Ship {
     this.vx = 0;
     this.vy = 0;
     this.angle = -Math.PI / 2;
+    this.turnQueue = 0;   // rad of swiped-but-not-yet-swept turn
     this.speedLevel = 0;
     this.invuln = CFG.ship.invulnTime;
     this.thrusting = false;
@@ -41,9 +42,20 @@ export class Ship {
   // Stepped drive: the ship flies where it points at speedLevel *
   // speedStep, easing toward that velocity so turns and speed changes
   // feel smooth rather than instant.
+  //
+  // Steering is stepped too: each swipe banks turnStep radians and the
+  // ship sweeps through them at turnRate, so it comes to rest pointing
+  // where you aimed it instead of spinning until you swipe back.
   update(dt, controls) {
     const c = CFG.ship;
-    this.angle += controls.rotate * c.turnRate * dt;
+    this.turnQueue += (controls.turn || 0) * c.turnStep;
+    this.turnQueue = Math.max(-c.maxTurnQueue, Math.min(c.maxTurnQueue, this.turnQueue));
+    const sweep = Math.min(Math.abs(this.turnQueue), c.turnRate * dt);
+    if (sweep > 0) {
+      const step = Math.sign(this.turnQueue) * sweep;
+      this.angle += step;
+      this.turnQueue -= step;
+    }
     this.thrusting = this.speedLevel > 0;
     const targetSpeed = this.speedLevel * c.speedStep;
     const tx = Math.cos(this.angle) * targetSpeed;
