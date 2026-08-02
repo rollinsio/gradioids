@@ -109,6 +109,92 @@ const after5c = tracked
   : 0; // already hit something — good enough
 check('missile closes on the nearest asteroid', after5c < before5c);
 
+// 5c-bis. Lightning pickup: the arc chains rock to rock and kills what
+// it touches. Rocks are placed by hand so the geometry is exact.
+const M = CFG.scale.pxPerM;
+game.bullets = [];
+game.missiles = [];
+game.hasMissiles = false;      // keep missiles out of the kill accounting
+game.pickups.push(new Pickup(game.ship.x, game.ship.y, 'lightning'));
+game.update(dt);
+check('lightning pickup arms the emitter', game.hasLightning === true);
+
+// A line of rocks: one just inside ship range, two more one hop apart,
+// and a fourth stranded past the chain range.
+// Clears everything else in flight so only the arc can kill a rock.
+const layout = (specs) => {
+  game.bullets = [];
+  game.missiles = [];
+  game.pickups = [];
+  game.asteroids = specs.map(([dx, dy]) => {
+    const a = new Asteroid(0, game.ship.x + dx, game.ship.y + dy);
+    a.vx = 0;
+    a.vy = 0;
+    return a;
+  });
+};
+const zap = CFG.lightning.range / M;         // in metres
+const hop = CFG.lightning.chainRange / M;
+layout([[zap * M, 0], [(zap + hop * 0.8) * M, 0], [(zap + hop * 1.6) * M, 0]]);
+game.bolts = [];
+game.lightningCooldown = 0;
+const chainScore = game.score;
+game.update(dt);
+check('every rock in the chain pays out',
+  game.score >= chainScore + 3 * CFG.asteroidTiers[0].score);
+check('a strike destroys the whole chain it reaches',
+  game.asteroids.filter((a) => a.tier === 0).length === 0);
+check('one bolt is drawn per link', game.bolts.length === 3);
+check('the strike goes on cooldown once it lands',
+  game.lightningCooldown === CFG.lightning.cooldown);
+
+// Out of range: nothing struck, and no cooldown spent on the whiff.
+layout([[(zap + 20) * M, 0]]);
+game.bolts = [];
+game.lightningCooldown = 0;
+game.update(dt);
+check('a rock beyond zap range is not struck', game.asteroids.length === 1);
+check('a whiffed strike costs no cooldown', game.lightningCooldown <= 0);
+
+// In ship range, but the next rock is past the chain hop.
+layout([[zap * M, 0], [(zap + hop + 10) * M, 0]]);
+game.bolts = [];
+game.lightningCooldown = 0;
+game.update(dt);
+check('the chain stops at a gap wider than the hop',
+  game.asteroids.length === 1 && game.bolts.length === 1);
+
+// A dense pack: the chain is capped at maxTargets even with more in reach.
+layout(Array.from({ length: CFG.lightning.maxTargets + 3 },
+  (_, i) => [(20 + i * 8) * M, 0]));
+game.bolts = [];
+game.lightningCooldown = 0;
+const packed = game.asteroids.length;
+game.update(dt);
+check(`the chain is capped at ${CFG.lightning.maxTargets} links`,
+  game.bolts.length === CFG.lightning.maxTargets
+  && game.asteroids.length === packed - CFG.lightning.maxTargets);
+
+// Bolts are cosmetic and clear themselves.
+for (let i = 0; i < Math.ceil(CFG.lightning.boltLife / dt) + 2; i++) game.update(dt);
+check('bolts expire', game.bolts.length === 0);
+
+// Splitting mid-chain must not let the arc hop to the fresh children.
+layout([]);
+const big = new Asteroid(2, game.ship.x + zap * M * 0.5, game.ship.y);
+big.vx = 0;
+big.vy = 0;
+game.asteroids = [big];
+game.bolts = [];
+game.lightningCooldown = 0;
+game.update(dt);
+check('a split rock does not feed its own children to the arc',
+  game.bolts.length === 1);
+
+// Hand the nuke test below a fresh field, well clear of the ship.
+game.hasLightning = false;
+layout([[240, 240], [-240, 240], [240, -240]]);
+
 // 5d. Nuke pickup clears the level and pays every rock's score.
 game.bullets = [];
 game.missiles = [];
@@ -132,8 +218,31 @@ rock.vy = 0;
 game.asteroids.push(rock);
 game.update(dt);
 check('death clears orbs (Gradius rules)', game.orbs.length === 0);
-check('death clears missiles and spread too',
-  !game.hasMissiles && !game.hasSpread && game.missiles.length === 0);
+check('death clears missiles, spread and lightning too',
+  !game.hasMissiles && !game.hasSpread && !game.hasLightning
+  && game.missiles.length === 0 && game.bolts.length === 0);
+
+// 6-bis. The metre scale. Every distance and speed is authored in
+// metres now; these are the pixel values they have to still produce,
+// i.e. exactly what was hand-tuned before the scale existed.
+const { PX_PER_M, m: metres, mps: metresPerSec, toM } = await import('../js/config.js');
+check('1 m is 2 px and the field is 300 m across',
+  PX_PER_M === 2 && CFG.scale.fieldM === 300 && metres(1) === 2 && metresPerSec(1) === 2);
+check('metres round-trip', toM(metres(37.5)) === 37.5);
+const asPx = {
+  'ship radius': [CFG.ship.radius, 12],
+  'ship speed step': [CFG.ship.speedStep, 75],
+  'bullet speed': [CFG.bullet.speed, 430],
+  'missile speed': [CFG.missile.speed, 300],
+  'small asteroid': [CFG.asteroidTiers[0].radius, 13],
+  'large asteroid': [CFG.asteroidTiers[2].radius, 44],
+  'wave safe radius': [CFG.wave.safeRadius, 140],
+  'zap range': [CFG.lightning.range, 90],
+  'chain range': [CFG.lightning.chainRange, 60],
+};
+const drifted = Object.entries(asPx).filter(([, [got, want]]) => got !== want);
+check(`the scale did not move any tuned pixel value${drifted.length ? ` (${drifted.map(([k, [g, w]]) => `${k} ${g}≠${w}`).join(', ')})` : ''}`,
+  drifted.length === 0);
 
 // 6b. Steering is per-swipe, not a latched spin: each swipe reports one
 // turn step and nothing carries over to the next frame.

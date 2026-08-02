@@ -285,6 +285,62 @@ export class Missile {
   }
 }
 
+// One link of a chain lightning strike: a jagged path between two
+// points that flashes and fades. Purely cosmetic — the damage is
+// resolved the instant the strike is computed (see Game.strikeLightning).
+export class Bolt {
+  constructor(x1, y1, x2, y2) {
+    this.life = CFG.lightning.boltLife;
+    this.maxLife = this.life;
+    // Fixed at birth rather than re-rolled per frame: a bolt that
+    // re-jitters every frame reads as noise, not as a strike.
+    const segments = 6;
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len;     // unit normal, to push points off the line
+    const ny = dx / len;
+    this.points = [];
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      // Ends stay pinned to the ship and the rock; the middle wanders.
+      const spread = Math.sin(t * Math.PI) * CFG.lightning.jitter;
+      const off = rand(-spread, spread);
+      this.points.push([x1 + dx * t + nx * off, y1 + dy * t + ny * off]);
+    }
+  }
+
+  update(dt) {
+    this.life -= dt;
+  }
+
+  get dead() {
+    return this.life <= 0;
+  }
+
+  draw(ctx) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(this.life / this.maxLife, 0);
+    ctx.strokeStyle = CFG.colors.lightning;
+    ctx.shadowColor = CFG.colors.lightning;
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    this.points.forEach(([px, py], i) => {
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    // Traced twice: a wide soft pass for the glow, a thin bright one
+    // for the filament.
+    ctx.lineWidth = 4;
+    ctx.globalAlpha *= 0.35;
+    ctx.stroke();
+    ctx.globalAlpha = Math.max(this.life / this.maxLife, 0);
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 // Short-lived line fragments for explosions.
 export class Particle {
   constructor(x, y, color) {
@@ -398,6 +454,7 @@ const PICKUP_STYLE = {
   orb: { colorKey: 'pickup', letter: '' },
   missile: { colorKey: 'missile', letter: 'M' },
   spread: { colorKey: 'spread', letter: 'S' },
+  lightning: { colorKey: 'lightning', letter: 'L' },
   nuke: { colorKey: 'nuke', letter: 'N' },
 };
 

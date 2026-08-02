@@ -58,9 +58,11 @@ without ending a run — edits the feel knobs in place:
 | TURN SPEED | `ship.turnRate` | 3.8 rad/s |
 | TURN DRIFT | `ship.turnDrift` | 0.15 s |
 | TURN BANK | `ship.maxTurnQueue` | 180° |
-| SPEED / LEVEL | `ship.speedStep` | 75 px/s |
+| SPEED / LEVEL | `ship.speedStep` | 37.5 m/s |
 | TOP SPEED | `ship.maxSpeedLevel` | 4 |
 | ACCEL | `ship.accel` | 3.5/s |
+| ZAP RANGE | `lightning.range` | 45 m |
+| CHAIN RANGE | `lightning.chainRange` | 30 m |
 
 ↑↓ picks a row, ←→ adjusts it, Escape (middle pinch) backs out. Values
 are written straight into `CFG` — a change made from pause is live the
@@ -69,6 +71,21 @@ moment you resume — and persist in `localStorage` under
 values that differ from stock stay bright in the list. To add a knob,
 append an entry to `TUNABLES` in `js/settings.js`; the screen and its
 storage pick it up with no other changes.
+
+## Scale
+
+**1 metre = 2 pixels.** The playfield is 300 m across (and wraps), the
+ship is about 12 m nose to tail, asteroids run 13 m to 44 m wide, and
+top speed is 150 m/s.
+
+Nothing was dimensioned until chain lightning needed a range you could
+reason about — "a 45 m arc" means something, "a 90 px arc" does not.
+Every distance and speed in `js/config.js` is now authored through
+`m()` / `mps()`, and the pixel values they produce are exactly the ones
+that were hand-tuned before the scale existed: naming what the numbers
+already meant, not changing them (`test/sim.mjs` asserts this). Rendering
+still works in pixels — the scale is an authoring and display unit, not
+a second coordinate system.
 
 ## Deploy to the glasses
 
@@ -85,7 +102,7 @@ index.html            600×600 canvas shell, MRBD meta tags
 manifest.webmanifest  name + icon
 js/config.js          all gameplay tuning knobs
 js/input.js           key handling + hold/tap control schemes
-js/entities.js        ship, asteroids, bullets, particles
+js/entities.js        ship, asteroids, bullets, bolts, particles
 js/settings.js        live-tunable knobs behind the CONTROLS screen
 js/game.js            state machine (menu/controls/playing/paused/gameover)
 js/main.js            rAF loop
@@ -102,11 +119,30 @@ Destroyed asteroids sometimes drop a pickup (chance and rarity weights in
 | ● (orb) | pink | Gradius-style option: trails the ship, auto-fires at the nearest rock at 1/4 the ship's rate. Up to `CFG.orb.max`. |
 | M (missile) | orange | Arms a launcher: homing missiles that arc toward the nearest asteroid every `CFG.missile.cooldown` s. |
 | S (spread) | green | Swaps the cannon for 3-shot volleys in a tight cone — more coverage, slower cadence. |
+| L (lightning) | pale blue | Chain lightning, below. |
 | N (nuke) | white | Very rare. Detonates on pickup: every asteroid on screen dies and pays its score. |
 
 Pickups you already have maxed pay bonus points instead. Dying loses
 everything (classic rules). All attributes live in `js/config.js` under
-`orb`, `missile`, `spread`, and `pickup`.
+`orb`, `missile`, `spread`, `lightning`, and `pickup`.
+
+### Chain lightning
+
+Every `CFG.lightning.cooldown` seconds the ship arcs to the nearest rock
+within **45 m**, then hops rock to rock within **30 m**, up to
+`maxTargets` links. Everything the arc touches is destroyed, splitting
+and paying out exactly as if it had been shot.
+
+The two ranges are the whole balance. The arc is short — 45 m against a
+300 m field — so you have to fly into the cluster to use it, and the
+chain hop is shorter still, so long chains only exist in packs. Range is
+measured to the rock's *edge*, which makes a 44 m boulder easier to
+catch than a pebble at the same centre distance. A strike that finds
+nothing in range costs no cooldown and retries the next frame.
+
+Like the orb and missile targeting, it ignores screen wrap: a rock just
+across the seam reads as far away and is skipped, rather than the bolt
+drawing a line back across the whole field.
 
 ## Roadmap
 

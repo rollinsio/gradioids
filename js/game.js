@@ -1,6 +1,6 @@
 import { CFG } from './config.js';
 import { Input, Controls, Keys } from './input.js';
-import { Ship, Asteroid, Bullet, Missile, Orb, Pickup, collides, explosion, rand } from './entities.js';
+import { Ship, Asteroid, Bolt, Bullet, Missile, Orb, Pickup, collides, explosion, rand } from './entities.js';
 import { Music } from './audio.js';
 import { Settings, TUNABLES } from './settings.js';
 
@@ -31,9 +31,12 @@ export class Game {
     this.orbs = [];
     this.pickups = [];
     this.missiles = [];
+    this.bolts = [];
     this.shipTrail = [];
     this.hasMissiles = false;
     this.hasSpread = false;
+    this.hasLightning = false;
+    this.lightningCooldown = 0;
     this.score = 0;
     this.lives = CFG.ship.lives;
     this.wave = 0;
@@ -115,10 +118,68 @@ export class Game {
         if (this.hasSpread) this.addScore(CFG.pickup.surplusScore);
         else this.hasSpread = true;
         break;
+      case 'lightning':
+        if (this.hasLightning) this.addScore(CFG.pickup.surplusScore);
+        else this.hasLightning = true;
+        break;
       case 'nuke':
         this.detonateNuke();
         break;
     }
+  }
+
+  // Chain lightning. The arc leaps from the ship to the nearest rock
+  // within CFG.lightning.range, then hops rock to rock within the
+  // shorter chainRange, and every link it touches is destroyed (rocks
+  // split and pay out exactly as if they had been shot).
+  //
+  // Range is measured to the rock's edge, so a 44 m boulder is easier
+  // to catch than a pebble at the same centre distance. Like the orb
+  // and missile targeting, this ignores screen wrap: a rock just across
+  // the seam reads as 300 m away and is skipped, rather than the bolt
+  // drawing a line back across the whole field.
+  //
+  // Returns whether anything was struck, so a strike that finds nothing
+  // costs no cooldown and retries next frame.
+  strikeLightning() {
+    const l = CFG.lightning;
+    const available = [...this.asteroids];
+    const targets = [];
+    let fromX = this.ship.x;
+    let fromY = this.ship.y;
+    let reach = l.range;
+
+    while (targets.length < l.maxTargets) {
+      let bestIndex = -1;
+      let bestD = Infinity;
+      available.forEach((a, i) => {
+        const d = Math.hypot(a.x - fromX, a.y - fromY);
+        if (d <= reach + a.radius && d < bestD) {
+          bestD = d;
+          bestIndex = i;
+        }
+      });
+      if (bestIndex < 0) break;
+      const [hit] = available.splice(bestIndex, 1);
+      targets.push(hit);
+      fromX = hit.x;
+      fromY = hit.y;
+      reach = l.chainRange;   // only the first link gets the long reach
+    }
+    if (targets.length === 0) return false;
+
+    // Trace the whole path before destroying anything: a rock that
+    // splits mid-chain would otherwise let the arc hop to children that
+    // did not exist when it struck.
+    let px = this.ship.x;
+    let py = this.ship.y;
+    for (const target of targets) {
+      this.bolts.push(new Bolt(px, py, target.x, target.y));
+      px = target.x;
+      py = target.y;
+    }
+    for (const target of targets) this.destroyAsteroid(target);
+    return true;
   }
 
   // Clears the level outright: every rock pays its score, nothing
@@ -285,6 +346,10 @@ export class Game {
         this.missiles.push(new Missile(this.ship.x, this.ship.y, this.ship.angle));
         this.missileCooldown = CFG.missile.cooldown;
       }
+      this.lightningCooldown -= dt;
+      if (this.hasLightning && this.lightningCooldown <= 0 && this.asteroids.length > 0) {
+        if (this.strikeLightning()) this.lightningCooldown = CFG.lightning.cooldown;
+      }
       for (const orb of this.orbs) {
         orb.follow(this.shipTrail, this.time);
         orb.cooldown -= dt;
@@ -308,10 +373,12 @@ export class Game {
     this.asteroids.forEach((a) => a.update(dt));
     this.bullets.forEach((b) => b.update(dt));
     this.missiles.forEach((m) => m.update(dt, this.asteroids));
+    this.bolts.forEach((b) => b.update(dt));
     this.particles.forEach((p) => p.update(dt));
     this.pickups.forEach((p) => p.update(dt));
     this.bullets = this.bullets.filter((b) => !b.dead);
     this.missiles = this.missiles.filter((m) => !m.dead);
+    this.bolts = this.bolts.filter((b) => !b.dead);
     this.particles = this.particles.filter((p) => !p.dead);
     this.pickups = this.pickups.filter((p) => !p.dead);
     if (this.nukeFlash > 0) this.nukeFlash -= dt;
@@ -353,8 +420,10 @@ export class Game {
         this.orbs = [];       // classic Gradius rules: upgrades die with you
         this.shipTrail = [];
         this.missiles = [];
+        this.bolts = [];
         this.hasMissiles = false;
         this.hasSpread = false;
+        this.hasLightning = false;
         this.lives -= 1;
         if (this.lives <= 0) {
           this.state = 'gameover';
@@ -443,8 +512,10 @@ export class Game {
     this.dimOverlay();
     this.text('CONTROLS', CFG.W / 2, 70, { size: 34, color: CFG.colors.accent, glow: 12 });
 
-    const top = 140;
-    const gap = 40;
+    // Tightens as knobs are added so the list keeps clearing the
+    // actions and the hint line.
+    const top = 128;
+    const gap = Math.min(40, 306 / TUNABLES.length);
     TUNABLES.forEach((t, i) => {
       const selected = i === this.controlsIndex;
       const y = top + i * gap;
@@ -461,7 +532,7 @@ export class Game {
       });
     });
 
-    const actionsTop = top + TUNABLES.length * gap + 16;
+    const actionsTop = top + TUNABLES.length * gap + 22;
     ['RESET DEFAULTS', 'BACK'].forEach((label, i) => {
       const selected = this.controlsIndex === TUNABLES.length + i;
       this.text(label, CFG.W / 2, actionsTop + i * 36, {
@@ -483,6 +554,7 @@ export class Game {
     this.pickups.forEach((p) => p.draw(ctx, this.time));
     this.bullets.forEach((b) => b.draw(ctx));
     this.missiles.forEach((m) => m.draw(ctx, this.time));
+    this.bolts.forEach((b) => b.draw(ctx));
     if (this.state !== 'gameover' && this.respawnTimer <= 0) {
       this.orbs.forEach((o) => o.draw(ctx, this.time));
       this.ship.draw(ctx, this.time);
@@ -520,6 +592,10 @@ export class Game {
       }
       if (this.hasMissiles) {
         this.text('M', wx, CFG.H - 18, { size: 16, color: CFG.colors.missile, glow: 6 });
+        wx -= 22;
+      }
+      if (this.hasLightning) {
+        this.text('L', wx, CFG.H - 18, { size: 16, color: CFG.colors.lightning, glow: 6 });
       }
     }
 

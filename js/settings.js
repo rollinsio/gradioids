@@ -1,4 +1,4 @@
-import { CFG } from './config.js';
+import { CFG, m, mps, toM } from './config.js';
 
 const STORE_KEY = 'gradioids.settings';
 const DEG = Math.PI / 180;
@@ -45,10 +45,10 @@ export const TUNABLES = [
   {
     key: 'speedStep',
     label: 'SPEED / LEVEL',
-    unit: ' px/s',
-    min: 25, max: 200, step: 5, decimals: 0,
-    read: () => CFG.ship.speedStep,
-    apply: (v) => { CFG.ship.speedStep = v; },
+    unit: ' m/s',
+    min: 12.5, max: 100, step: 2.5, decimals: 1,
+    read: () => toM(CFG.ship.speedStep),
+    apply: (v) => { CFG.ship.speedStep = mps(v); },
   },
   {
     key: 'maxSpeedLevel',
@@ -65,6 +65,22 @@ export const TUNABLES = [
     min: 0.5, max: 10, step: 0.5, decimals: 1,
     read: () => CFG.ship.accel,
     apply: (v) => { CFG.ship.accel = v; },
+  },
+  {
+    key: 'zapRange',
+    label: 'ZAP RANGE',
+    unit: ' m',
+    min: 10, max: 120, step: 5, decimals: 0,
+    read: () => toM(CFG.lightning.range),
+    apply: (v) => { CFG.lightning.range = m(v); },
+  },
+  {
+    key: 'chainRange',
+    label: 'CHAIN RANGE',
+    unit: ' m',
+    min: 5, max: 90, step: 5, decimals: 0,
+    read: () => toM(CFG.lightning.chainRange),
+    apply: (v) => { CFG.lightning.chainRange = m(v); },
   },
 ];
 
