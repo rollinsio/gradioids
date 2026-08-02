@@ -21,7 +21,7 @@ Controls (desktop = glasses):
 
 | Key | Neural Band | In game |
 | --- | --- | --- |
-| ← / → | swipe left/right | turn one step that way (45° by default, tunable) |
+| ← / → | swipe left/right | turn one step that way (45° by default, tunable); **hold to keep turning** (keyboard only) |
 | ↑ | swipe up | speed level +1 |
 | ↓ | swipe down | speed level −1 |
 | Enter | index pinch | select (menus) |
@@ -30,8 +30,8 @@ Controls (desktop = glasses):
 The ship fires automatically — there is no fire button. Flight is a
 stepped drive: the ship flies where it points at one of
 `CFG.ship.maxSpeedLevel` speed levels (HUD pips bottom-left), easing
-between levels and around turns. Everything is discrete swipes — no
-held keys — because Neural Band gestures arrive as single key taps.
+between levels and around turns. On the glasses every input is a
+discrete swipe, because Neural Band gestures arrive as single key taps.
 
 Steering is stepped the same way: a swipe banks `CFG.ship.turnStep`
 radians and the ship sweeps through them, then holds that heading.
@@ -46,6 +46,30 @@ how fast it can rotate at all, which is what a stack of swipes hits
 first — they turn flat out, then drift in. At stock values a single
 45° swipe is 90% turned in ~0.35s and fully settled by ~0.9s;
 `turnDrift = 0` removes the tail and restores a hard stop.
+
+### Holding a key on the web
+
+On a real keyboard, holding ← or → turns the ship continuously at
+`turnRate` for as long as it is down, and releasing drifts out of the
+turn. Tapping still steps, so both schemes are live at once.
+
+The two are told apart by `KeyboardEvent.repeat` — the OS auto-repeat
+flag, i.e. the browser stating that a key is physically held. A
+discrete tap cannot produce one, so the glasses can never fall into the
+held mode by accident; that is why this is gated on the repeat flag
+rather than on a "key was down for N ms" timer, which a slow gesture
+could trip. Nothing about the Meta input path changes.
+
+A hold takes over from banked swipe steps rather than adding to them,
+so holding never turns faster than `turnRate`. Releasing hands the
+sweep exactly the angle it would coast through decelerating from
+`turnRate` with time constant `turnDrift`, so letting go of a hold
+drifts out the same way the end of a swipe does.
+
+Speed stays tap-only in both schemes — auto-repeat on ↑ would slam the
+ship to full throttle in a couple of frames. On the CONTROLS screen,
+holding ←→ runs a value up or down at a throttled rate, while row
+selection stays tap-only.
 
 ## Tuning it on the glasses
 
@@ -101,7 +125,7 @@ Docs: <https://wearables.developer.meta.com/docs/develop/webapps/>
 index.html            600×600 canvas shell, MRBD meta tags
 manifest.webmanifest  name + icon
 js/config.js          all gameplay tuning knobs
-js/input.js           key handling + hold/tap control schemes
+js/input.js           key handling; tap steps + keyboard-only holds
 js/entities.js        ship, asteroids, bullets, bolts, particles
 js/settings.js        live-tunable knobs behind the CONTROLS screen
 js/game.js            state machine (menu/controls/playing/paused/gameover)

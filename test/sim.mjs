@@ -251,6 +251,8 @@ const fakeInput = {
   keys: new Set(),
   pressed(k) { return this.keys.has(k); },
 };
+fakeInput.repeats = new Set();
+fakeInput.repeating = function (k) { return this.repeats.has(k); };
 const ctl = new Controls(fakeInput);
 fakeInput.keys = new Set(['ArrowRight']);
 check('right swipe reports one right step', ctl.update().turn === 1);
@@ -260,10 +262,75 @@ fakeInput.keys = new Set(['ArrowLeft']);
 check('left swipe reports one left step', ctl.update().turn === -1);
 fakeInput.keys = new Set(['ArrowLeft']);
 check('a second left swipe turns left again', ctl.update().turn === -1);
+check('a swipe alone never reports a hold', ctl.update().hold === 0);
+fakeInput.keys = new Set(['ArrowLeft']);
+fakeInput.repeats = new Set(['ArrowLeft']);
+check('a held left key reports a left hold', ctl.update().hold === -1);
+fakeInput.repeats = new Set(['ArrowLeft', 'ArrowRight']);
+check('holding both directions cancels out', ctl.update().hold === 0);
+fakeInput.repeats = new Set();
+
+const { Ship } = await import('../js/entities.js');
+
+// 6b-bis. The web-only hold, and the guarantee that the glasses can
+// never reach it: continuous turning is gated on OS key repeat, which
+// a discrete tap does not produce.
+const { Input } = await import('../js/input.js');
+const handlers = {};
+const fakeTarget = {
+  addEventListener: (type, fn) => { (handlers[type] ||= []).push(fn); },
+};
+const realInput = new Input(fakeTarget);
+const fire = (type, key, repeat = false) =>
+  handlers[type].forEach((fn) => fn({ key, repeat, preventDefault() {} }));
+
+// A tap, exactly as the Neural Band delivers it.
+fire('keydown', 'ArrowLeft');
+check('a tap is an edge press', realInput.pressed('ArrowLeft') === true);
+check('a tap is never a hold', realInput.repeating('ArrowLeft') === false);
+realInput.endFrame();
+fire('keyup', 'ArrowLeft');
+check('a released tap leaves no hold', realInput.repeating('ArrowLeft') === false);
+
+// A desktop hold: keydown, then the OS auto-repeats.
+fire('keydown', 'ArrowLeft');
+realInput.endFrame();
+fire('keydown', 'ArrowLeft', true);
+check('an auto-repeat marks the key held', realInput.repeating('ArrowLeft') === true);
+check('an auto-repeat is not a fresh edge press',
+  realInput.pressed('ArrowLeft') === false);
+check('the hold survives across frames', (realInput.endFrame(),
+  realInput.repeating('ArrowLeft') === true));
+fire('keyup', 'ArrowLeft');
+check('releasing ends the hold', realInput.repeating('ArrowLeft') === false);
+
+// 6c-bis. A held key turns the ship continuously, then drifts out.
+const holder = new Ship();
+const holdStart = holder.angle;
+for (let i = 0; i < 60; i++) holder.update(dt, { turn: 0, hold: 1, speedDelta: 0 });
+const holdSwept = holder.angle - holdStart;
+check(`a held key turns at turnRate (${(holdSwept / (60 * dt)).toFixed(2)} rad/s)`,
+  Math.abs(holdSwept - CFG.ship.turnRate * 60 * dt) < 1e-9);
+// Releasing coasts through exactly the angle a decel from turnRate covers.
+const releaseAt = holder.angle;
+holder.update(dt, { turn: 0, hold: 0, speedDelta: 0 });
+for (let i = 0; i < 400 && holder.turnQueue !== 0; i++) {
+  holder.update(dt, { turn: 0, hold: 0, speedDelta: 0 });
+}
+check(`releasing a hold drifts out over ${(CFG.ship.turnRate * CFG.ship.turnDrift * 180 / Math.PI).toFixed(0)}°`,
+  Math.abs((holder.angle - releaseAt) - CFG.ship.turnRate * CFG.ship.turnDrift) < 1e-9);
+check('the ship stops after the release drift', holder.turnQueue === 0);
+
+// A hold takes over from banked swipes instead of stacking with them.
+const both = new Ship();
+const bothStart = both.angle;
+for (let i = 0; i < 3; i++) both.update(dt, { turn: 1, hold: 0, speedDelta: 0 });
+for (let i = 0; i < 30; i++) both.update(dt, { turn: 0, hold: 1, speedDelta: 0 });
+check('a hold never turns faster than turnRate',
+  both.angle - bothStart <= CFG.ship.turnRate * 33 * dt + 1e-9);
 
 // 6c. The ship sweeps through exactly turnStep radians per swipe and
 // then holds its new heading.
-const { Ship } = await import('../js/entities.js');
 const ship = new Ship();
 const startAngle = ship.angle;
 ship.update(dt, { turn: -1, speedDelta: 0 });

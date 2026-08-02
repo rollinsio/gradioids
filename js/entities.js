@@ -38,6 +38,7 @@ export class Ship {
     this.vy = 0;
     this.angle = -Math.PI / 2;
     this.turnQueue = 0;   // rad of swiped-but-not-yet-swept turn
+    this.holdTurn = 0;    // -1/0/+1 while a turn key is held down
     this.speedLevel = 0;
     this.invuln = CFG.ship.invulnTime;
     this.thrusting = false;
@@ -59,6 +60,22 @@ export class Ship {
   // turnDrift = 0 disables the tail and restores a hard stop.
   update(dt, controls) {
     const c = CFG.ship;
+    const hold = controls.hold || 0;
+    if (hold !== 0) {
+      // Held key (desktop only): turn flat out for as long as it is
+      // down. This takes over from any banked swipe steps rather than
+      // adding to them, so holding never turns faster than turnRate.
+      this.turnQueue = 0;
+      this.holdTurn = hold;
+      this.angle += hold * c.turnRate * dt;
+    } else if (this.holdTurn !== 0) {
+      // Just released. Hand the sweep exactly the angle it would coast
+      // through decelerating from turnRate with time constant
+      // turnDrift, so letting go of a hold drifts out the same way the
+      // end of a swipe does.
+      this.turnQueue = this.holdTurn * c.turnRate * c.turnDrift;
+      this.holdTurn = 0;
+    }
     this.turnQueue += (controls.turn || 0) * c.turnStep;
     this.turnQueue = Math.max(-c.maxTurnQueue, Math.min(c.maxTurnQueue, this.turnQueue));
     const left = Math.abs(this.turnQueue);

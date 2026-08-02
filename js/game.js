@@ -6,6 +6,11 @@ import { Settings, TUNABLES } from './settings.js';
 
 const HISCORE_KEY = 'gradioids.hiscore';
 
+// s between steps while a turn key is held on the controls screen —
+// fast enough to run a knob across its range, slow enough to stop on
+// a value.
+const CONTROLS_REPEAT = 0.07;
+
 export class Game {
   constructor(canvas) {
     this.ctx = canvas.getContext('2d');
@@ -18,6 +23,7 @@ export class Game {
     this.menuIndex = 0;
     this.controlsIndex = 0;
     this.controlsReturn = 'menu';   // where BACK goes: menu or paused
+    this.adjustTimer = 0;           // throttles a held ←→ on that screen
     this.time = 0;
   }
 
@@ -197,7 +203,7 @@ export class Game {
     this.time += dt;
     switch (this.state) {
       case 'menu': this.updateMenu(); break;
-      case 'controls': this.updateControls(); break;
+      case 'controls': this.updateControls(dt); break;
       case 'playing': this.updatePlaying(dt); break;
       case 'paused': this.updatePaused(); break;
       case 'gameover': this.updateGameover(); break;
@@ -227,6 +233,7 @@ export class Game {
   openControls(returnTo) {
     this.controlsReturn = returnTo;
     this.controlsIndex = 0;
+    this.adjustTimer = 0;
     this.state = 'controls';
   }
 
@@ -243,7 +250,12 @@ export class Game {
   // ←→ adjust the highlighted value, ↑↓ move between rows. Changes go
   // straight into CFG, so a tweak made from the pause menu is live the
   // moment you resume.
-  updateControls() {
+  //
+  // Holding ←→ runs a value up or down, throttled to a readable rate
+  // rather than one step per frame — some knobs have 20-odd notches and
+  // tapping through them is tedious. Row selection stays tap-only:
+  // auto-repeat would make a nine-row list impossible to land on.
+  updateControls(dt = 0) {
     const rows = this.controlsRowCount;
     if (this.input.pressed(Keys.UP)) {
       this.controlsIndex = (this.controlsIndex + rows - 1) % rows;
@@ -257,9 +269,22 @@ export class Game {
     }
     const tunable = TUNABLES[this.controlsIndex];
     if (tunable) {
-      const dir =
+      const tapped =
         (this.input.pressed(Keys.RIGHT) ? 1 : 0) - (this.input.pressed(Keys.LEFT) ? 1 : 0);
-      if (dir !== 0) this.settings.adjust(tunable, dir);
+      const held =
+        (this.input.repeating(Keys.RIGHT) ? 1 : 0) - (this.input.repeating(Keys.LEFT) ? 1 : 0);
+      if (tapped !== 0) {
+        this.settings.adjust(tunable, tapped);
+        this.adjustTimer = 0;
+      } else if (held !== 0) {
+        this.adjustTimer -= dt;
+        if (this.adjustTimer <= 0) {
+          this.settings.adjust(tunable, held);
+          this.adjustTimer = CONTROLS_REPEAT;
+        }
+      } else {
+        this.adjustTimer = 0;
+      }
       return;
     }
     if (this.input.pressed(Keys.SELECT)) {
@@ -309,7 +334,7 @@ export class Game {
     }
 
     const shipAlive = this.respawnTimer <= 0;
-    const c = shipAlive ? this.controls.update() : { turn: 0, speedDelta: 0 };
+    const c = shipAlive ? this.controls.update() : { turn: 0, hold: 0, speedDelta: 0 };
 
     if (shipAlive) {
       // Clamped every frame, not just on a swipe: lowering TOP SPEED on
